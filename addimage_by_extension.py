@@ -12,9 +12,7 @@ class HighlightFeature:
   def __init__(self, layer):
     self.layer = layer
     self.msgBar = utils.iface.messageBar()
-    self.hl = None
-    self.geom = None
-    self.width = None
+    self.hl = self.geom = self.width = None
   #
   def _changeWidth(self):
     if self.hl is None:
@@ -68,8 +66,9 @@ class HighlightFeature:
 class CatalogOTF:
   def __init__(self):
     self.canvas = utils.iface.mapCanvas()
-    self.layer, self.nameFieldSource, self.nameFieldDate =  None, None, None
-    self.ltgCatalog, self.dicImage , self.hlFeature = None, None, None
+    self.layer = self.nameFieldSource = self.nameFieldDate =  None
+    self.ltgCatalog = self.dicImage = None
+    self.hlFeature = self.currentImage= None
     self.zoomImage = False
     self.highlightImage = False
     self.msgBar = utils.iface.messageBar()
@@ -186,28 +185,15 @@ class CatalogOTF:
         msg = "%s - Total %d" % ( self.ltgCatalog.name(), len( images ) )
         utils.iface.mainWindow().statusBar().showMessage( msg )
     #
-    def getCurrentImage():
-      currentImage = None
-      currentLayer = ltv.currentLayer()
-      if not currentLayer is None and \
-         currentLayer.type() == QgsMapLayer.RasterLayer and \
-         not self.ltgCatalog.findLayer( currentLayer.id() ) is None:
-        #
-        currentImage = basename( currentLayer.source() )
-      #
-      return currentImage
-    #
-    def setCurrentImage( currentImage ):
-      if not currentImage is None:
-        sourceImage = self.dicImage[currentImage]['source']
-        ltlsImage = filter( lambda item: item.layer().source() == sourceImage, self.ltgCatalog.findLayers()  )
-        if len( ltlsImage ) > 0:
-          ltv.setCurrentLayer( None ) # Clear selection
-          ltv.setCurrentLayer( ltlsImage[0].layer() )
-          if self.highlightImage:
-            self.hlFeature.highlight( self.dicImage [ currentImage ]['id'], 3 )
-        else:
-          self.hlFeature.clean()
+    def setCurrentImage( ):
+      sourceImage = self.dicImage[ self.currentImage ]['source']
+      ltlsImage = filter( lambda item: item.layer().source() == sourceImage, self.ltgCatalog.findLayers()  )
+      if len( ltlsImage ) > 0:
+        ltv.setCurrentLayer( ltlsImage[0].layer() )
+        if self.highlightImage:
+          self.hlFeature.highlight( self.dicImage [ self.currentImage ]['id'], 3 )
+      else:
+        self.hlFeature.clean()
     #
     if self.layer is None:
       self.msgBar.pushMessage( "Need define layer catalog", QgsMessageBar.WARNING, 2 )
@@ -215,18 +201,17 @@ class CatalogOTF:
     #
     ltv = utils.iface.layerTreeView()
     #
-    currentImage = getCurrentImage()
-    #
-    self.ltgCatalog.removeAllChildren()
-    #
-    addImages( getImagesByCanvas() )
-    #
     prevFlag = self.canvas.renderFlag()
     self.canvas.setRenderFlag( False )
     signal_slot = { 'signal': ltv.currentLayerChanged , 'slot': self.onCurrentLayerChanged }
     signal_slot['signal'].disconnect( signal_slot['slot'] )
     #
-    setCurrentImage( currentImage )
+    self.ltgCatalog.removeAllChildren()
+    #
+    addImages( getImagesByCanvas() )
+    #
+    if not self.currentImage is None:
+      setCurrentImage() 
     #    
     signal_slot['signal'].connect( signal_slot['slot'] )
     self.canvas.setRenderFlag( prevFlag )
@@ -235,6 +220,8 @@ class CatalogOTF:
   def onCurrentLayerChanged(self, rasterLayer):
     if not self.highlightImage and not self.zoomImage :
       return
+    #
+    self.currentImage = None
     #
     if rasterLayer is None or \
        rasterLayer.type() != QgsMapLayer.RasterLayer or \
@@ -250,14 +237,16 @@ class CatalogOTF:
       self.msgBar.pushMessage( msg, QgsMessageBar.CRITICAL, 4 )
       return
     #
+    self.currentImage = image
+    #
     if self.highlightImage:
-      self.hlFeature.highlight( self.dicImage[ image ]['id'], 3 )
+      self.hlFeature.highlight( self.dicImage[ self.currentImage ]['id'], 3 )
     #
     if self.zoomImage:
       geom = self.hlFeature.geometry()
       #
       if geom is None:
-        geom = self.hlFeature.calcGeometry( self.dicImage [image]['id'] )
+        geom = self.hlFeature.calcGeometry( self.dicImage [ self.currentImage ]['id'] )
         if geom is None:
           return
       #
