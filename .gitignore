@@ -1,0 +1,6 @@
+# Only the file addimage_by_extension.py will be not ignored
+*
+!addimage_by_extension.py
+!README.md
+!.gitignore
+
