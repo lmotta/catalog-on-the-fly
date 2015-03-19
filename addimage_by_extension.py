@@ -1,6 +1,8 @@
+#!/usr/local/bin/python
 # -*- coding: utf-8 -*-
 
 import urllib2
+from datetime import datetime
 from os.path import basename
 from PyQt4.QtCore import ( QTimer, QFileInfo, Qt )
 from qgis.gui import ( QgsHighlight, QgsMessageBar ) 
@@ -12,6 +14,17 @@ from qgis.core import (
   QgsRasterLayer, QgsRasterTransparency,
 )
 from qgis.utils import ( iface )
+
+class FileDebug:
+  def __init__(self):
+    self.nameFileDebug = "/home/lmotta/data/qgis_script_console/addimage_by_extension/addimage_by_extension.log"
+
+  def write(self, line):
+    print self.nameFileDebug
+    f = open(self.nameFileDebug, 'a')
+    f.write( "%s - %s\r\n" % ( line, str( datetime.now() ) ) )
+    f.close()
+
 
 class FeatureImage:
 
@@ -98,6 +111,8 @@ class CatalogOTF:
     self.ltgCatalog = self.dicImages = None
     self.featureImage = None
     self.zoomImage = self.highlightImage = False
+    #
+    self.fileDebug = FileDebug()
 
   def _connect(self, isConnect = True):
     ss = [
@@ -246,6 +261,7 @@ class CatalogOTF:
     ss = { 'signal': self.ltv.currentLayerChanged , 'slot': self.onCurrentLayerChanged }
     ss['signal'].disconnect( ss['slot'] )
     #
+    self.fileDebug.write("_populateGroupCatalog")
     self.ltgCatalog.removeAllChildren()
     #
     addImages( getImagesByCanvas() )
@@ -338,7 +354,6 @@ class CatalogOTF:
     self.highlightImage = on
     if on and self._setFeatureImage( self.ltv.currentLayer() ):
       self.featureImage.highlight( 3 )
-
 
 def init():
   layer = iface.mapCanvas().currentLayer()
