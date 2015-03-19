@@ -81,6 +81,7 @@ class FeatureImage:
     #
     self.hl.setWidth( 5 )
     self.hl.show()
+    self.layer.triggerRepaint()
     #
     QTimer.singleShot( second * 1000, self.hide )
 
@@ -112,14 +113,14 @@ class CatalogOTF:
     self.featureImage = None
     self.zoomImage = self.highlightImage = False
     #
-    self.fileDebug = FileDebug()
+    #self.fileDebug = FileDebug()
 
   def _connect(self, isConnect = True):
     ss = [
       { 'signal': self.canvas.extentsChanged , 'slot': self.onExtentsChangedMapCanvas },
       { 'signal': self.canvas.destinationCrsChanged, 'slot': self.onDestinationCrsChanged_MapUnitsChanged },
       { 'signal': self.canvas.mapUnitsChanged, 'slot': self.onDestinationCrsChanged_MapUnitsChanged },
-      { 'signal': self.ltv.currentLayerChanged , 'slot': self.onCurrentLayerChanged  }
+      { 'signal': self.ltv.activated , 'slot': self.onActivated   }
     ]
     if isConnect:
       for item in ss:
@@ -258,10 +259,10 @@ class CatalogOTF:
       if len( ltlsImage ) > 0:
         self.ltv.setCurrentLayer( ltlsImage[0].layer() )
     
-    ss = { 'signal': self.ltv.currentLayerChanged , 'slot': self.onCurrentLayerChanged }
+    ss = { 'signal': self.ltv.activated , 'slot': self.onActivated   }
     ss['signal'].disconnect( ss['slot'] )
     #
-    self.fileDebug.write("_populateGroupCatalog")
+    #self.fileDebug.write("_populateGroupCatalog")
     self.ltgCatalog.removeAllChildren()
     #
     addImages( getImagesByCanvas() )
@@ -278,10 +279,12 @@ class CatalogOTF:
     #
     self._populateGroupCatalog()
 
-  def onCurrentLayerChanged(self, layer ):
+  def onActivated(self, index ):
     if self.layer is None:
       self.msgBar.pushMessage( "Need define layer catalog", QgsMessageBar.WARNING, 2 )
       return
+    #
+    layer = self.ltv.currentLayer()
     #
     if layer is None or not self.highlightImage and not self.zoomImage :
       return
