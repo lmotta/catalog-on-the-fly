@@ -1,9 +1,7 @@
 # -*- coding: utf-8 -*-
 
-
 import urllib2
 from os.path import basename
-
 from PyQt4.QtCore import ( QTimer, QFileInfo, Qt )
 from qgis.gui import ( QgsHighlight, QgsMessageBar ) 
 from qgis.core import (
@@ -60,15 +58,18 @@ class FeatureImage:
   def image(self):
     return self._image
 
-  def highlight(self, second=0 ):
+  def hide(self):
+    self.hl.hide()
+    self.layer.triggerRepaint()
 
+  def highlight(self, second=0 ):
     if self.hl is None:
       return
     #
     self.hl.setWidth( 5 )
     self.hl.show()
     #
-    QTimer.singleShot( second * 1000, self.hl.hide )
+    QTimer.singleShot( second * 1000, self.hide )
 
   def zoom(self):
     if self.geom is None:
@@ -99,17 +100,17 @@ class CatalogOTF:
     self.zoomImage = self.highlightImage = False
 
   def _connect(self, isConnect = True):
-    signal_slot = [
+    ss = [
       { 'signal': self.canvas.extentsChanged , 'slot': self.onExtentsChangedMapCanvas },
       { 'signal': self.canvas.destinationCrsChanged, 'slot': self.onDestinationCrsChanged_MapUnitsChanged },
       { 'signal': self.canvas.mapUnitsChanged, 'slot': self.onDestinationCrsChanged_MapUnitsChanged },
       { 'signal': self.ltv.currentLayerChanged , 'slot': self.onCurrentLayerChanged  }
     ]
     if isConnect:
-      for item in signal_slot:
+      for item in ss:
         item['signal'].connect( item['slot'] )  
     else:
-      for item in signal_slot:
+      for item in ss:
         item['signal'].disconnect( item['slot'] )  
 
   def _setFeatureImage(self, layer):
@@ -134,7 +135,7 @@ class CatalogOTF:
     #
     return True
 
-  def onExtentsChangedMapCanvas(self):
+  def _populateGroupCatalog(self):
 
     def getImagesByCanvas():
       images = []
@@ -241,13 +242,9 @@ class CatalogOTF:
       ltlsImage = filter( lambda item: item.layer().source() == sourceImage, self.ltgCatalog.findLayers()  )
       if len( ltlsImage ) > 0:
         self.ltv.setCurrentLayer( ltlsImage[0].layer() )
-
-    if self.layer is None:
-      self.msgBar.pushMessage( "Need define layer catalog", QgsMessageBar.WARNING, 2 )
-      return
-    #
-    signal_slot = { 'signal': self.ltv.currentLayerChanged , 'slot': self.onCurrentLayerChanged }
-    signal_slot['signal'].disconnect( signal_slot['slot'] )
+    
+    ss = { 'signal': self.ltv.currentLayerChanged , 'slot': self.onCurrentLayerChanged }
+    ss['signal'].disconnect( ss['slot'] )
     #
     self.ltgCatalog.removeAllChildren()
     #
@@ -256,9 +253,20 @@ class CatalogOTF:
     if not self.featureImage.image() is None:
       setCurrentImage() 
     #    
-    signal_slot['signal'].connect( signal_slot['slot'] )
+    ss['signal'].connect( ss['slot'] )
+
+  def onExtentsChangedMapCanvas(self):
+    if self.layer is None:
+      self.msgBar.pushMessage( "Need define layer catalog", QgsMessageBar.WARNING, 2 )
+      return
+    #
+    self._populateGroupCatalog()
 
   def onCurrentLayerChanged(self, layer ):
+    if self.layer is None:
+      self.msgBar.pushMessage( "Need define layer catalog", QgsMessageBar.WARNING, 2 )
+      return
+    #
     if layer is None or not self.highlightImage and not self.zoomImage :
       return
     #
@@ -267,11 +275,15 @@ class CatalogOTF:
     if not self._setFeatureImage( layer ): 
       return
     #
+    if self.zoomImage:
+      ss = { 'signal': self.canvas.extentsChanged , 'slot': self.onExtentsChangedMapCanvas }
+      ss['signal'].disconnect( ss['slot'] )
+      self.featureImage.zoom()
+      ss['signal'].connect( ss['slot'] )
+      self._populateGroupCatalog()
+    #
     if self.highlightImage:
       self.featureImage.highlight( 3 )
-    #
-    if self.zoomImage:
-      self.featureImage.zoom()
 
   def onDestinationCrsChanged_MapUnitsChanged(self):
     self.onExtentsChangedMapCanvas()
@@ -316,7 +328,11 @@ class CatalogOTF:
   def onZoomImage(self, on=True):
     self.zoomImage = on
     if on and self._setFeatureImage( self.ltv.currentLayer() ): 
+      ss = { 'signal': self.canvas.extentsChanged , 'slot': self.onExtentsChangedMapCanvas }
+      ss['signal'].disconnect( ss['slot'] )
       self.featureImage.zoom()
+      ss['signal'].connect( ss['slot'] )
+      self._populateGroupCatalog()
 
   def onHighlightImage(self, on=True):
     self.highlightImage = on
