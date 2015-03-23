@@ -31,8 +31,8 @@ class FeatureImage:
 
   def __init__(self, layer):
     self.layer = layer
-    self._image = self.geom = self.hl = self.msgError = None
     self.canvas = iface.mapCanvas()
+    self._image = self.geom = self.hl = self.msgError = None
 
   def _getGeometry(self, fid):
     fr = QgsFeatureRequest( fid )
@@ -44,20 +44,19 @@ class FeatureImage:
 
     return QgsGeometry( feat.geometry() ) if isOk else None
 
-  def setImage(self, image=None, dicImages=None):
-    if image is None and dicImages is None:
-      self._image = None
-      del self.geom
-      self.geom = None
-      return True 
-    #
+  def clear(self):
+    del self.geom
+    del self.hl
+    self._image = self.geom = self.hl = None
+
+  def setImage(self, image, dicImages):
     if self._image == image:
       return True
     #
     fid = dicImages[ image ]['id']
     geom = self._getGeometry( fid )
     if geom is None:
-      self.msgError = "Feature (fid = %d) of layer ('%s') is invalid" % ( fid, self.layer.name() )
+      self.msgError = "Geometry of feature (fid = %d) of layer ('%s') is invalid" % ( fid, self.layer.name() )
       return False
     #
     self.geom = geom
@@ -107,6 +106,7 @@ class CatalogOTF:
   def __init__(self):
     self.canvas = iface.mapCanvas()
     self.ltv = iface.layerTreeView()
+    self.ltgRoot = QgsProject.instance().layerTreeRoot()
     self.msgBar = iface.messageBar()
     self.tempDir = "/tmp"
     self.layer = self.nameFieldSource = self.nameFieldDate =  None
@@ -122,7 +122,9 @@ class CatalogOTF:
       { 'signal': self.canvas.destinationCrsChanged, 'slot': self.onDestinationCrsChanged_MapUnitsChanged },
       { 'signal': self.canvas.selectionChanged, 'slot': self.onSelectionChanged },
       { 'signal': self.canvas.mapUnitsChanged, 'slot': self.onDestinationCrsChanged_MapUnitsChanged },
-      { 'signal': self.ltv.activated , 'slot': self.onActivated   }
+      { 'signal': self.ltv.activated , 'slot': self.onActivated   },
+      { 'signal': QgsMapLayerRegistry.instance().layersWillBeRemoved , 'slot': self.onLayersWillBeRemoved   },
+      { 'signal': self.ltgRoot.willRemoveChildren , 'slot': self.onWillRemoveChildren  }
     ]
     if isConnect:
       for item in ss:
@@ -293,6 +295,12 @@ class CatalogOTF:
     #    
     ss['signal'].connect( ss['slot'] )
 
+  def _setGroupCatalog(self):
+    nameCatalogGroup = "%s - Catalog" % self.layer.name()
+    self.ltgCatalog = self.ltgRoot.findGroup( nameCatalogGroup )
+    if self.ltgCatalog is None:
+      self.ltgCatalog = self.ltgRoot.addGroup( nameCatalogGroup )
+
   def onExtentsChangedMapCanvas(self):
     if self.layer is None:
       self.msgBar.pushMessage( "Need define layer catalog", QgsMessageBar.WARNING, 2 )
@@ -313,7 +321,7 @@ class CatalogOTF:
     if layer is None: # or not self.highlightImage and not self.zoomImage :
       return
     #
-    self.featureImage.setImage() # Clear
+    self.featureImage.clear()
     #
     if not self._setFeatureImage( layer ): 
       return
@@ -327,6 +335,18 @@ class CatalogOTF:
     #
     if self.highlightImage:
       self.featureImage.highlight( 3 )
+
+  def onLayersWillBeRemoved(self, layerIds):
+    if self.layer.id() in layerIds:
+      self.removeLayerCatalog()
+
+  def onWillRemoveChildren(self, node, indexFrom, indexTo):
+    if node == self.ltgCatalog:
+      return
+    #  
+    childrens = filter( lambda item: item == self.ltgCatalog, node.children() )
+    if len(childrens) > 0 :
+      self.enable( False )
 
   def onDestinationCrsChanged_MapUnitsChanged(self):
     self.onExtentsChangedMapCanvas()
@@ -358,21 +378,25 @@ class CatalogOTF:
     self.nameFieldDate = nameFieldDate
     setDicImages()
 
+  def removeLayerCatalog(self):
+    self.featureImage.clear()
+    self.dicImages.clear()
+    self.featureImage = self.dicImages = None 
+    #
+    self._connect( False )
+    #
+    self.ltgRoot.removeChildNode( self.ltgCatalog )
+    self.ltgCatalog = None
+    #
+    self.layer = self.nameFieldSource = self.nameFieldDate =  None
+
   def enable( self, onEnabled=True ):
-
-    def setGroupCatalog():
-      nameCatalogGroup = "%s - Catalog" % self.layer.name()
-      root = QgsProject.instance().layerTreeRoot()
-      self.ltgCatalog = root.findGroup( nameCatalogGroup )
-      if self.ltgCatalog is None:
-        self.ltgCatalog = root.addGroup( nameCatalogGroup )
-
     self._connect( onEnabled )
     if onEnabled:
-      setGroupCatalog()
+      self._setGroupCatalog()
       self.onExtentsChangedMapCanvas()
 
-  def onZoomImage(self, on=True):
+  def enableZoomImage(self, on=True):
     self.zoomImage = on
     if on and self._setFeatureImage( self.ltv.currentLayer() ): 
       ss = { 'signal': self.canvas.extentsChanged , 'slot': self.onExtentsChangedMapCanvas }
@@ -381,22 +405,23 @@ class CatalogOTF:
       ss['signal'].connect( ss['slot'] )
       self._populateGroupCatalog()
 
-  def onHighlightImage(self, on=True):
+  def enableHighlightImage(self, on=True):
     self.highlightImage = on
     if on and self._setFeatureImage( self.ltv.currentLayer() ):
       self.featureImage.highlight( 3 )
 
-  def onSelectedImage(self, on=True):
+  def enableSelectedImage(self, on=True):
     self.selectedImage = on
     self._populateGroupCatalog()
+
 
 def init():
   layer = iface.mapCanvas().currentLayer()
   if layer is None:
     print "Selecione o layer de catalogo"
     return None
-  if layer.type() == QgsMapLayer.RasterLayer:
-    print u"Layer selecione é do tipo RASTER, selecione o layer de catalogo"
+  if not layer.type() == QgsMapLayer.VectorLayer:
+    print u"Layer selecionado não é do tipo VETOR, selecione o layer de catalogo"
     return None
   cotf = CatalogOTF(); cotf.setLayerCatalog( layer, "address", "data" )
   cotf.enable()
@@ -406,7 +431,7 @@ def init():
 #
 """
 execfile(u'/home/lmotta/data/qgis_script_console/addimage_by_extension/addimage_by_extension.py'.encode('UTF-8')); cotf = init()
-cotf.onHighlightImage(); cotf.onZoomImage()
-cotf.onSelectedImage()
-cotf.enable( False ); del cotf; cotf = None
+cotf.enableHighlightImage(); cotf.enableZoomImage()
+cotf.enableSelectedImage()
+cotf.enable( False ); cotf.removeLayerCatalog(); cotf = None
 """
