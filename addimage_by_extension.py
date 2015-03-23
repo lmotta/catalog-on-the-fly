@@ -282,6 +282,9 @@ class CatalogOTF:
       return
     #
     self._populateGroupCatalog()
+    #
+    if self.highlightImage:
+      self.featureImage.highlight( 3 )
 
   def onActivated(self, index ):
     if self.layer is None:
