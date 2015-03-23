@@ -131,7 +131,7 @@ class CatalogOTF:
         item['signal'].connect( item['slot'] )  
     else:
       for item in ss:
-        item['signal'].disconnect( item['slot'] )  
+        item['signal'].disconnect( item['slot'] )
 
   def _setFeatureImage(self, layer):
     if layer is None or \
@@ -341,12 +341,13 @@ class CatalogOTF:
       self.removeLayerCatalog()
 
   def onWillRemoveChildren(self, node, indexFrom, indexTo):
-    if node == self.ltgCatalog:
+    if node == self.ltgCatalog: 
       return
-    #  
-    childrens = filter( lambda item: item == self.ltgCatalog, node.children() )
-    if len(childrens) > 0 :
+    #
+    removeNode = node.children()[ indexFrom ]
+    if removeNode == self.ltgCatalog:
       self.enable( False )
+      return
 
   def onDestinationCrsChanged_MapUnitsChanged(self):
     self.onExtentsChangedMapCanvas()
@@ -382,8 +383,6 @@ class CatalogOTF:
     self.featureImage.clear()
     self.dicImages.clear()
     self.featureImage = self.dicImages = None 
-    #
-    self._connect( False )
     #
     self.ltgRoot.removeChildNode( self.ltgCatalog )
     self.ltgCatalog = None
