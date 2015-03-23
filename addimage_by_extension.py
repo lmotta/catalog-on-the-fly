@@ -12,6 +12,7 @@ from qgis.core import (
   QgsFeature, QgsFeatureRequest, QgsGeometry,
   QgsCoordinateTransform,
   QgsRasterLayer, QgsRasterTransparency,
+  QgsLayerTreeNode
 )
 from qgis.utils import ( iface )
 
@@ -154,6 +155,17 @@ class CatalogOTF:
 
   def _populateGroupCatalog(self):
 
+    def getCurrentStatusLayerCatalog():
+      node = self.ltv.currentNode()
+      if node is None or not node.nodeType() == QgsLayerTreeNode.NodeLayer:
+        return None
+      #
+      ltlCurrent = self.ltgCatalog.findLayer( node.layerId() )
+      if ltlCurrent is None:
+        return None
+      #
+      return { 'source': node.layer().source(), 'visible': node.isVisible() }
+
     def getImagesByCanvas():
       images = []
       #
@@ -261,12 +273,17 @@ class CatalogOTF:
       sourceImage = self.dicImages[ self.featureImage.image() ]['source']
       ltlsImage = filter( lambda item: item.layer().source() == sourceImage, self.ltgCatalog.findLayers()  )
       if len( ltlsImage ) > 0:
-        self.ltv.setCurrentLayer( ltlsImage[0].layer() )
+        ltl = ltlsImage[0]
+        layer = ltl.layer()
+        self.ltv.setCurrentLayer( layer )
+        if not cslc is None and cslc['source'] == layer.source():
+          ltl.setVisible( cslc['visible'] ) 
     
     ss = { 'signal': self.ltv.activated , 'slot': self.onActivated   }
     ss['signal'].disconnect( ss['slot'] )
     #
-    #self.fileDebug.write("_populateGroupCatalog")
+    cslc = getCurrentStatusLayerCatalog()
+    #
     self.ltgCatalog.removeAllChildren()
     #
     addImages( getImagesByCanvas() )
@@ -293,7 +310,7 @@ class CatalogOTF:
     #
     layer = self.ltv.currentLayer()
     #
-    if layer is None or not self.highlightImage and not self.zoomImage :
+    if layer is None: # or not self.highlightImage and not self.zoomImage :
       return
     #
     self.featureImage.setImage() # Clear
