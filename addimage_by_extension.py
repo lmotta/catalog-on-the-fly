@@ -111,7 +111,7 @@ class CatalogOTF:
     self.layer = self.nameFieldSource = self.nameFieldDate =  None
     self.ltgCatalog = self.dicImages = None
     self.featureImage = None
-    self.zoomImage = self.highlightImage = False
+    self.zoomImage = self.highlightImage = self.selectedImage = False
     #
     #self.fileDebug = FileDebug()
 
@@ -119,6 +119,7 @@ class CatalogOTF:
     ss = [
       { 'signal': self.canvas.extentsChanged , 'slot': self.onExtentsChangedMapCanvas },
       { 'signal': self.canvas.destinationCrsChanged, 'slot': self.onDestinationCrsChanged_MapUnitsChanged },
+      { 'signal': self.canvas.selectionChanged, 'slot': self.onSelectionChanged },
       { 'signal': self.canvas.mapUnitsChanged, 'slot': self.onDestinationCrsChanged_MapUnitsChanged },
       { 'signal': self.ltv.activated , 'slot': self.onActivated   }
     ]
@@ -156,7 +157,8 @@ class CatalogOTF:
     def getImagesByCanvas():
       images = []
       #
-      rectLayer = self.layer.extent()
+      rectLayer = self.layer.extent() if not self.selectedImage else self.layer.boundingBoxOfSelected()
+      
       crsLayer = self.layer.crs()
       #
       crsCanvas = self.canvas.mapSettings().destinationCrs()
@@ -165,11 +167,13 @@ class CatalogOTF:
       rectCanvas = self.canvas.extent() if crsCanvas == crsLayer else ct.transform( self.canvas.extent() )
       #
       if not rectLayer.intersects( rectCanvas ):
-        return images 
+        return [] 
       #
       fr = QgsFeatureRequest( rectCanvas )
+      if self.selectedImage:
+        fr.setFilterFids( self.layer.selectedFeaturesIds() )
       #fr.setSubsetOfAttributes( [ self.nameFieldSource ], self.layer.dataProvider().fields() )
-      it = self.layer.getFeatures( fr )
+      it = self.layer.getFeatures( fr ) 
       f = QgsFeature()
       while it.nextFeature( f ):
         images.append( basename( f[ self.nameFieldSource ] ) )
@@ -307,6 +311,10 @@ class CatalogOTF:
   def onDestinationCrsChanged_MapUnitsChanged(self):
     self.onExtentsChangedMapCanvas()
 
+  def onSelectionChanged(self):
+    if self.selectedImage:
+      self._populateGroupCatalog()
+
   def setLayerCatalog(self, layer, nameFieldSource, nameFieldDate ):
 
     def setDicImages():
@@ -358,6 +366,10 @@ class CatalogOTF:
     if on and self._setFeatureImage( self.ltv.currentLayer() ):
       self.featureImage.highlight( 3 )
 
+  def onSelectedImage(self, on=True):
+    self.selectedImage = on
+    self._populateGroupCatalog()
+
 def init():
   layer = iface.mapCanvas().currentLayer()
   if layer is None:
@@ -375,5 +387,6 @@ def init():
 """
 execfile(u'/home/lmotta/data/qgis_script_console/addimage_by_extension/addimage_by_extension.py'.encode('UTF-8')); cotf = init()
 cotf.onHighlightImage(); cotf.onZoomImage()
+cotf.onSelectedImage()
 cotf.enable( False ); del cotf; cotf = None
 """
