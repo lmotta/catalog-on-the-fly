@@ -120,8 +120,8 @@ class CatalogOTF:
     ss = [
       { 'signal': self.canvas.extentsChanged , 'slot': self.onExtentsChangedMapCanvas },
       { 'signal': self.canvas.destinationCrsChanged, 'slot': self.onDestinationCrsChanged_MapUnitsChanged },
-      { 'signal': self.canvas.selectionChanged, 'slot': self.onSelectionChanged },
       { 'signal': self.canvas.mapUnitsChanged, 'slot': self.onDestinationCrsChanged_MapUnitsChanged },
+      { 'signal': self.layer.selectionChanged, 'slot': self.onSelectionChanged },
       { 'signal': self.ltv.activated , 'slot': self.onActivated   },
       { 'signal': QgsMapLayerRegistry.instance().layersWillBeRemoved , 'slot': self.onLayersWillBeRemoved   },
       { 'signal': self.ltgRoot.willRemoveChildren , 'slot': self.onWillRemoveChildren  }
@@ -402,30 +402,30 @@ class CatalogOTF:
       #          
       return True if value.isValid() else False
 
-    if layer.type() != QgsMapLayer.VectorLayer or layer.geometryType() != QGis.Polygon:
+    if layer is None or layer.type() != QgsMapLayer.VectorLayer or layer.geometryType() != QGis.Polygon:
       return None
     #
     firstFeature = getFirstFeature()
     if firstFeature is None:
       return None
     #
-    fieldAddress = None
+    fieldSource = None
     fieldDate = None
     isOk = False
     for item in layer.pendingFields().toList():
       if item.type() == QVariant.String:
-        if fieldAddress is None and hasAddress( firstFeature, layer.fieldNameIndex( item.name() ) ):
-          fieldAddress = item.name()
+        if fieldSource is None and hasAddress( firstFeature, layer.fieldNameIndex( item.name() ) ):
+          fieldSource = item.name()
       elif item.type() == QVariant.Date:
         if fieldDate is None and hasDate( firstFeature, layer.fieldNameIndex( item.name() ) ):
           fieldDate = item.name()
-      if not fieldAddress is None and not fieldDate is None :
+      if not fieldSource is None and not fieldDate is None :
         isOk = True
         break
     #
-    return { 'nameAddress': fieldAddress, 'nameDate': fieldDate } if isOk else None 
+    return { 'nameSource': fieldSource, 'nameDate': fieldDate } if isOk else None 
 
-  def setLayerCatalog(self, layer, nameFieldSource, nameFieldDate ):
+  def setLayerCatalog(self, layer, nameFiedlsCatalog ):
 
     def setDicImages():
       fr = QgsFeatureRequest()
@@ -444,8 +444,8 @@ class CatalogOTF:
 
     self.layer = layer
     self.featureImage = FeatureImage( layer )
-    self.nameFieldSource = nameFieldSource
-    self.nameFieldDate = nameFieldDate
+    self.nameFieldSource = nameFiedlsCatalog[ 'nameSource' ]
+    self.nameFieldDate = nameFiedlsCatalog[ 'nameDate' ]
     setDicImages()
 
   def removeLayerCatalog(self):
@@ -484,14 +484,13 @@ class CatalogOTF:
 
 
 def init():
+  cotf = CatalogOTF()
   layer = iface.mapCanvas().currentLayer()
-  if layer is None:
-    print "Selecione o layer de catalogo"
+  nameFiedlsCatalog = cotf.getNameFieldsCatalog( layer )
+  if nameFiedlsCatalog is None:
+    print u"Selecione o layer de catalogo (Campos com endereço e data da imagem)"
     return None
-  if not layer.type() == QgsMapLayer.VectorLayer:
-    print u"Layer selecionado não é do tipo VETOR, selecione o layer de catalogo"
-    return None
-  cotf = CatalogOTF(); cotf.setLayerCatalog( layer, "address", "data" )
+  cotf.setLayerCatalog( layer, nameFiedlsCatalog )
   cotf.enable()
   #
   return cotf
@@ -504,8 +503,4 @@ execfile(u'/home/lmotta/data/qgis_script_console/addimage_by_extension/addimage_
 cotf.enableHighlightImage(); cotf.enableZoomImage()
 cotf.enableSelectedImage()
 cotf.enable( False ); cotf.removeLayerCatalog(); cotf = None
-
-execfile(u'/home/lmotta/data/qgis_script_console/addimage_by_extension/addimage_by_extension.py'.encode('UTF-8'));
-layer = iface.mapCanvas().currentLayer(); cotf = CatalogOTF()
-fieldsName = cotf.getNameFieldsCatalog( layer )
 """
