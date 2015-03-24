@@ -4,10 +4,10 @@
 import urllib2
 from datetime import datetime
 from os.path import basename
-from PyQt4.QtCore import ( QTimer, QFileInfo, Qt )
+from PyQt4.QtCore import ( QTimer, QFileInfo, Qt, QVariant, QPyNullVariant )
 from qgis.gui import ( QgsHighlight, QgsMessageBar ) 
 from qgis.core import (
-  QgsProject,
+  QgsProject, QGis,
   QgsMapLayerRegistry, QgsMapLayer,
   QgsFeature, QgsFeatureRequest, QgsGeometry,
   QgsCoordinateTransform,
@@ -356,6 +356,75 @@ class CatalogOTF:
     if self.selectedImage:
       self._populateGroupCatalog()
 
+  def getNameFieldsCatalog(self, layer):
+
+    def getFirstFeature():
+      f = QgsFeature()
+      #
+      fr = QgsFeatureRequest( 0 )
+      it = layer.getFeatures( fr )
+      isOk = it.nextFeature( f )
+      it.close()
+      #
+      if not isOk or not f.isValid():
+        del f
+        return None
+      else:
+        return f
+    
+    def hasAddress(feature, idField):
+
+      def asValidUrl( url):
+        isOk = True
+        try:
+          urllib2.urlopen(url)
+        except urllib2.HTTPError, e:
+          isOk = False
+        except urllib2.URLError, e:
+          isOk = False
+        #
+        return isOk  
+
+      value = feature.attributes()[ idField ]
+      if value is None or type(value) == QPyNullVariant:
+        return False
+      #
+      if value.find('http://') == 0:
+        return asValidUrl( value )
+      #
+      fileInfo = QFileInfo( value )
+      return fileInfo.isFile()
+
+    def hasDate(feature, idField):
+      value = feature.attributes()[ idField ]
+      if value is None or type(value) == QPyNullVariant:
+        return False
+      #          
+      return True if value.isValid() else False
+
+    if layer.type() != QgsMapLayer.VectorLayer or layer.geometryType() != QGis.Polygon:
+      return None
+    #
+    firstFeature = getFirstFeature()
+    if firstFeature is None:
+      return None
+    #
+    fieldAddress = None
+    fieldDate = None
+    isOk = False
+    for item in layer.pendingFields().toList():
+      if item.type() == QVariant.String:
+        if fieldAddress is None and hasAddress( firstFeature, layer.fieldNameIndex( item.name() ) ):
+          fieldAddress = item.name()
+      elif item.type() == QVariant.Date:
+        if fieldDate is None and hasDate( firstFeature, layer.fieldNameIndex( item.name() ) ):
+          fieldDate = item.name()
+      if not fieldAddress is None and not fieldDate is None :
+        isOk = True
+        break
+    #
+    return { 'nameAddress': fieldAddress, 'nameDate': fieldDate } if isOk else None 
+
   def setLayerCatalog(self, layer, nameFieldSource, nameFieldDate ):
 
     def setDicImages():
@@ -426,6 +495,8 @@ def init():
   cotf.enable()
   #
   return cotf
+
+
 #
 #
 """
@@ -433,4 +504,8 @@ execfile(u'/home/lmotta/data/qgis_script_console/addimage_by_extension/addimage_
 cotf.enableHighlightImage(); cotf.enableZoomImage()
 cotf.enableSelectedImage()
 cotf.enable( False ); cotf.removeLayerCatalog(); cotf = None
+
+execfile(u'/home/lmotta/data/qgis_script_console/addimage_by_extension/addimage_by_extension.py'.encode('UTF-8'));
+layer = iface.mapCanvas().currentLayer(); cotf = CatalogOTF()
+fieldsName = cotf.getNameFieldsCatalog( layer )
 """
