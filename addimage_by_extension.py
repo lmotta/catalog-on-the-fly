@@ -250,7 +250,8 @@ class CatalogOTF:
         value = self.dicImages [image]
         source = value['source']
         date = value['date']
-        fileInfo = prepareFileTMS( source ) if not source.find('http://') == -1 else QFileInfo( source )
+        isUrl = source.find('http://') == 0 or source.find('https://') == 0
+        fileInfo = prepareFileTMS( source ) if isUrl else QFileInfo( source )
         #
         return _addImage()
 
@@ -389,7 +390,8 @@ class CatalogOTF:
       if value is None or type(value) == QPyNullVariant:
         return False
       #
-      if value.find('http://') == 0:
+      isUrl = value.find('http://') == 0 or value.find('https://') == 0
+      if isUrl:
         return asValidUrl( value )
       #
       fileInfo = QFileInfo( value )
@@ -503,4 +505,12 @@ execfile(u'/home/lmotta/data/qgis_script_console/addimage_by_extension/addimage_
 cotf.enableHighlightImage(); cotf.enableZoomImage()
 cotf.enableSelectedImage()
 cotf.enable( False ); cotf.removeLayerCatalog(); cotf = None
+
+Alterações:
+Incluir verificação https p/ URL (feito)
+Fazer o refresh do Canvas na ferramenta de Zoom
+Usar o indexador espacial p/ selecionar as imagens do canvas
+
+
+
 """
