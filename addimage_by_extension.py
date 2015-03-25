@@ -172,11 +172,9 @@ class CatalogOTF:
       images = []
       #
       rectLayer = self.layer.extent() if not self.selectedImage else self.layer.boundingBoxOfSelected()
-      
       crsLayer = self.layer.crs()
       #
       crsCanvas = self.canvas.mapSettings().destinationCrs()
-      # Transform
       ct = QgsCoordinateTransform( crsCanvas, crsLayer )
       rectCanvas = self.canvas.extent() if crsCanvas == crsLayer else ct.transform( self.canvas.extent() )
       #
@@ -190,7 +188,8 @@ class CatalogOTF:
       it = self.layer.getFeatures( fr ) 
       f = QgsFeature()
       while it.nextFeature( f ):
-        images.append( basename( f[ self.nameFieldSource ] ) )
+        if f.geometry().intersects( rectCanvas ):
+          images.append( basename( f[ self.nameFieldSource ] ) )
       #
       return images
 
@@ -356,7 +355,8 @@ class CatalogOTF:
     if self.selectedImage:
       self._populateGroupCatalog()
 
-  def getNameFieldsCatalog(self, layer):
+  @staticmethod
+  def getNameFieldsCatalog(layer):
 
     def getFirstFeature():
       f = QgsFeature()
@@ -484,12 +484,12 @@ class CatalogOTF:
 
 
 def init():
-  cotf = CatalogOTF()
   layer = iface.mapCanvas().currentLayer()
-  nameFiedlsCatalog = cotf.getNameFieldsCatalog( layer )
+  nameFiedlsCatalog = CatalogOTF.getNameFieldsCatalog( layer )
   if nameFiedlsCatalog is None:
     print u"Selecione o layer de catalogo (Campos com endereço e data da imagem)"
     return None
+  cotf = CatalogOTF()
   cotf.setLayerCatalog( layer, nameFiedlsCatalog )
   cotf.enable()
   #
