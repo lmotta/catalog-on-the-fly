@@ -9,7 +9,7 @@ from qgis.gui import ( QgsHighlight, QgsMessageBar )
 from qgis.core import (
   QgsProject, QGis,
   QgsMapLayerRegistry, QgsMapLayer,
-  QgsFeature, QgsFeatureRequest, QgsGeometry,
+  QgsFeature, QgsFeatureRequest, QgsGeometry, QgsSpatialIndex,
   QgsCoordinateTransform,
   QgsRasterLayer, QgsRasterTransparency,
   QgsLayerTreeNode
@@ -73,7 +73,7 @@ class FeatureImage:
 
   def hide(self):
     self.hl.hide()
-    self.layer.triggerRepaint()
+    self.canvas.refresh()
 
   def highlight(self, second=0 ):
     if self.hl is None:
@@ -81,7 +81,7 @@ class FeatureImage:
     #
     self.hl.setWidth( 5 )
     self.hl.show()
-    self.layer.triggerRepaint()
+    self.canvas.refresh()
     #
     QTimer.singleShot( second * 1000, self.hide )
 
@@ -95,7 +95,7 @@ class FeatureImage:
     extent = self.geom.boundingBox() if crsCanvas == crsLayer else ct.transform( self.geom.boundingBox() )
     #
     self.canvas.setExtent( extent )
-    self.layer.triggerRepaint()
+    self.canvas.refresh()
 
   def msgError(self):
     return self.msgError
@@ -181,15 +181,25 @@ class CatalogOTF:
       if not rectLayer.intersects( rectCanvas ):
         return [] 
       #
-      fr = QgsFeatureRequest( rectCanvas )
+      fr = QgsFeatureRequest()
       if self.selectedImage:
         fr.setFilterFids( self.layer.selectedFeaturesIds() )
       #fr.setSubsetOfAttributes( [ self.nameFieldSource ], self.layer.dataProvider().fields() )
+      index = QgsSpatialIndex( self.layer.getFeatures( fr ) )
+      fids = index.intersects( rectCanvas )
+      #
+      del fr
+      del index
+      #
+      fr = QgsFeatureRequest()
+      fr.setFilterFids ( fids )
       it = self.layer.getFeatures( fr ) 
       f = QgsFeature()
       while it.nextFeature( f ):
         if f.geometry().intersects( rectCanvas ):
           images.append( basename( f[ self.nameFieldSource ] ) )
+      #
+      del fids[:]
       #
       return images
 
@@ -486,7 +496,7 @@ class CatalogOTF:
 
 
 def init():
-  layer = iface.mapCanvas().currentLayer()
+  layer = iface.activeLayer()
   nameFiedlsCatalog = CatalogOTF.getNameFieldsCatalog( layer )
   if nameFiedlsCatalog is None:
     print u"Selecione o layer de catalogo (Campos com endereço e data da imagem)"
