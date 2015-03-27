@@ -106,11 +106,13 @@ class CatalogOTF:
   def __init__(self):
     self.canvas = iface.mapCanvas()
     self.ltv = iface.layerTreeView()
+    self.model = self.ltv.layerTreeModel()
     self.ltgRoot = QgsProject.instance().layerTreeRoot()
     self.msgBar = iface.messageBar()
     self.tempDir = "/tmp"
     self.layer = self.nameFieldSource = self.nameFieldDate =  None
     self.ltgCatalog = self.dicImages = None
+    self.nameCatalogGroup  = None
     self.featureImage = None
     self.zoomImage = self.highlightImage = self.selectedImage = False
     #
@@ -122,9 +124,10 @@ class CatalogOTF:
       { 'signal': self.canvas.destinationCrsChanged, 'slot': self.onDestinationCrsChanged_MapUnitsChanged },
       { 'signal': self.canvas.mapUnitsChanged, 'slot': self.onDestinationCrsChanged_MapUnitsChanged },
       { 'signal': self.layer.selectionChanged, 'slot': self.onSelectionChanged },
-      { 'signal': self.ltv.activated , 'slot': self.onActivated   },
+      { 'signal': self.ltv.activated, 'slot': self.onActivated   },
+      { 'signal': self.model.dataChanged, 'slot': self.onDataChanged   },
       { 'signal': QgsMapLayerRegistry.instance().layersWillBeRemoved , 'slot': self.onLayersWillBeRemoved   },
-      { 'signal': self.ltgRoot.willRemoveChildren , 'slot': self.onWillRemoveChildren  }
+      { 'signal': self.ltgRoot.willRemoveChildren, 'slot': self.onWillRemoveChildren  }
     ]
     if isConnect:
       for item in ss:
@@ -306,10 +309,10 @@ class CatalogOTF:
     ss['signal'].connect( ss['slot'] )
 
   def _setGroupCatalog(self):
-    nameCatalogGroup = "%s - Catalog" % self.layer.name()
-    self.ltgCatalog = self.ltgRoot.findGroup( nameCatalogGroup )
+    self.nameCatalogGroup = "%s - Catalog" % self.layer.name()
+    self.ltgCatalog = self.ltgRoot.findGroup( self.nameCatalogGroup  )
     if self.ltgCatalog is None:
-      self.ltgCatalog = self.ltgRoot.addGroup( nameCatalogGroup )
+      self.ltgCatalog = self.ltgRoot.addGroup( self.nameCatalogGroup )
 
   def onExtentsChangedMapCanvas(self):
     if self.layer is None:
@@ -345,6 +348,14 @@ class CatalogOTF:
     #
     if self.highlightImage:
       self.featureImage.highlight( 3 )
+
+  def onDataChanged(self, idTL, idBR):
+    nameCatalogGroup = self.ltgCatalog.name()
+    if idTL == idBR and self.ltgCatalog == self.model.index2node( idBR ) and self.nameCatalogGroup != nameCatalogGroup:
+      sb = iface.mainWindow().statusBar() 
+      msg = sb.currentMessage().replace( self.nameCatalogGroup, nameCatalogGroup )
+      self.nameCatalogGroup = nameCatalogGroup
+      sb.showMessage( msg )
 
   def onLayersWillBeRemoved(self, layerIds):
     if self.layer.id() in layerIds:
@@ -471,10 +482,13 @@ class CatalogOTF:
     self.layer = self.nameFieldSource = self.nameFieldDate =  None
 
   def enable( self, onEnabled=True ):
-    self._connect( onEnabled )
     if onEnabled:
       self._setGroupCatalog()
+      self._connect( True )
       self.onExtentsChangedMapCanvas()
+    else:
+      self._connect( False )
+    
 
   def enableZoomImage(self, on=True):
     self.zoomImage = on
@@ -512,15 +526,10 @@ def init():
 #
 """
 execfile(u'/home/lmotta/data/qgis_script_console/addimage_by_extension/addimage_by_extension.py'.encode('UTF-8')); cotf = init()
-cotf.enableHighlightImage(); cotf.enableZoomImage()
+cotf.enableHighlightImage()
+cotf.enableZoomImage()
 cotf.enableSelectedImage()
-cotf.enable( False ); cotf.removeLayerCatalog(); cotf = None
-
-Alterações:
-Incluir verificação https p/ URL (feito)
-Fazer o refresh do Canvas na ferramenta de Zoom
-Usar o indexador espacial p/ selecionar as imagens do canvas
-
-
+cotf.enable( False )
+cotf = None
 
 """
