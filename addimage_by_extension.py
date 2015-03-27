@@ -110,9 +110,9 @@ class CatalogOTF:
     self.ltgRoot = QgsProject.instance().layerTreeRoot()
     self.msgBar = iface.messageBar()
     self.tempDir = "/tmp"
-    self.layer = self.nameFieldSource = self.nameFieldDate =  None
-    self.ltgCatalog = self.dicImages = None
-    self.nameCatalogGroup  = None
+    self.layer = self.layerName = self.nameFieldSource = self.nameFieldDate = None
+    self.ltgCatalog = self.ltgCatalogName = self.dicImages = None
+    self.funcOut = None
     self.featureImage = None
     self.zoomImage = self.highlightImage = self.selectedImage = False
     #
@@ -281,8 +281,7 @@ class CatalogOTF:
         self.msgBar.pushMessage( "Images invalid:\n%s" % msg, QgsMessageBar.CRITICAL, 5 )
         del l_error[:]
       else:
-        msg = "%s - Total %d" % ( self.ltgCatalog.name(), len( images ) )
-        iface.mainWindow().statusBar().showMessage( msg )
+        self.funcOut['changedTotalImages']( self.layer.id(), len( images ) )
 
     def setCurrentImage():
       sourceImage = self.dicImages[ self.featureImage.image() ]['source']
@@ -309,10 +308,10 @@ class CatalogOTF:
     ss['signal'].connect( ss['slot'] )
 
   def _setGroupCatalog(self):
-    self.nameCatalogGroup = "%s - Catalog" % self.layer.name()
-    self.ltgCatalog = self.ltgRoot.findGroup( self.nameCatalogGroup  )
+    self.ltgCatalogName = "%s - Catalog" % self.layer.name()
+    self.ltgCatalog = self.ltgRoot.findGroup( self.ltgCatalogName  )
     if self.ltgCatalog is None:
-      self.ltgCatalog = self.ltgRoot.addGroup( self.nameCatalogGroup )
+      self.ltgCatalog = self.ltgRoot.addGroup( self.ltgCatalogName )
 
   def onExtentsChangedMapCanvas(self):
     if self.layer is None:
@@ -350,15 +349,23 @@ class CatalogOTF:
       self.featureImage.highlight( 3 )
 
   def onDataChanged(self, idTL, idBR):
-    nameCatalogGroup = self.ltgCatalog.name()
-    if idTL == idBR and self.ltgCatalog == self.model.index2node( idBR ) and self.nameCatalogGroup != nameCatalogGroup:
-      sb = iface.mainWindow().statusBar() 
-      msg = sb.currentMessage().replace( self.nameCatalogGroup, nameCatalogGroup )
-      self.nameCatalogGroup = nameCatalogGroup
-      sb.showMessage( msg )
+    if idTL != idBR:
+      return
+    #
+    if self.ltgCatalog == self.model.index2node( idBR ):
+      name = self.ltgCatalog.name()
+      if self.ltgCatalogName != name:
+        self.funcOut['changedNameGroup']( self.layer.id(), name )
+        self.ltgCatalogName = name
+    elif self.ltgRoot.findLayer( self.layer.id() ) == self.model.index2node( idBR ):
+      name = self.layer.name()
+      if self.layerName != name:
+        self.funcOut['changedNameLayer']( self.layer.id(), name )
+        self.layerName = name
 
   def onLayersWillBeRemoved(self, layerIds):
     if self.layer.id() in layerIds:
+      self.funcOut['removedLayer']( self.layer.id() )
       self.removeLayerCatalog()
 
   def onWillRemoveChildren(self, node, indexFrom, indexTo):
@@ -368,7 +375,7 @@ class CatalogOTF:
     removeNode = node.children()[ indexFrom ]
     if removeNode == self.ltgCatalog:
       self.enable( False )
-      return
+      self.funcOut['removedGroup']( self.layer.id() )
 
   def onDestinationCrsChanged_MapUnitsChanged(self):
     self.onExtentsChangedMapCanvas()
@@ -448,7 +455,7 @@ class CatalogOTF:
     #
     return { 'nameSource': fieldSource, 'nameDate': fieldDate } if isOk else None 
 
-  def setLayerCatalog(self, layer, nameFiedlsCatalog ):
+  def setLayerCatalog(self, layer, nameFiedlsCatalog, funcOut):
 
     def setDicImages():
       fr = QgsFeatureRequest()
@@ -466,6 +473,8 @@ class CatalogOTF:
       it.close()
 
     self.layer = layer
+    self.layerName = layer.name()
+    self.funcOut = funcOut
     self.featureImage = FeatureImage( layer )
     self.nameFieldSource = nameFiedlsCatalog[ 'nameSource' ]
     self.nameFieldDate = nameFiedlsCatalog[ 'nameDate' ]
@@ -484,6 +493,7 @@ class CatalogOTF:
   def enable( self, onEnabled=True ):
     if onEnabled:
       self._setGroupCatalog()
+      self.ltgCatalogName = self.ltgCatalog.name()
       self._connect( True )
       self.onExtentsChangedMapCanvas()
     else:
@@ -510,13 +520,44 @@ class CatalogOTF:
 
 
 def init():
+  def changedCatalogNameLayer(layeID, name):
+    msg = "Change name Catalog(%s) Layer to '%s'" % ( layeID, name )
+    msgBar.pushMessage( msg, QgsMessageBar.INFO, 2 )
+
+  def removedCatalogLayer(layeID):
+    msg = "Catalog(%s) Layer removed" % ( layeID )
+    msgBar.pushMessage( msg, QgsMessageBar.INFO, 2 )
+  
+  def changedCatalogNameGroup(layeID, name):
+    msg = "Change name Catalog(%s) Group to '%s'" % ( layeID, name )
+    msgBar.pushMessage( msg, QgsMessageBar.INFO, 2 )
+
+  def removedCatalogGroup(layeID):
+    msg = "Catalog(%s) Group removed" % ( layeID )
+    msgBar.pushMessage( msg, QgsMessageBar.INFO, 2 )
+
+  def changeCatalogTotalImages(layeID, total):
+    msg = "Total images Catalog(%s) = %d'" % ( layeID, total )
+    msgBar.pushMessage( msg, QgsMessageBar.INFO, 2 )
+  
+  
+  funcOut = {
+      'changedNameLayer': changedCatalogNameLayer,
+      'removedLayer': removedCatalogLayer,
+      'changedNameGroup': changedCatalogNameGroup,
+      'removedGroup': removedCatalogGroup,
+      'changedTotalImages': changeCatalogTotalImages
+  }
+  msgBar = iface.messageBar()
+  #
+  
   layer = iface.activeLayer()
   nameFiedlsCatalog = CatalogOTF.getNameFieldsCatalog( layer )
   if nameFiedlsCatalog is None:
     print u"Selecione o layer de catalogo (Campos com endereço e data da imagem)"
     return None
   cotf = CatalogOTF()
-  cotf.setLayerCatalog( layer, nameFiedlsCatalog )
+  cotf.setLayerCatalog( layer, nameFiedlsCatalog, funcOut )
   cotf.enable()
   #
   return cotf
