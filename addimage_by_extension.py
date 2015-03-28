@@ -4,7 +4,8 @@
 import urllib2
 from datetime import datetime
 from os.path import basename
-from PyQt4.QtCore import ( QTimer, QFileInfo, Qt, QVariant, QPyNullVariant )
+from PyQt4.QtCore import ( Qt, QTimer, QFileInfo, QVariant, QPyNullVariant )
+from PyQt4.QtGui  import ( QTableWidget, QTableWidgetItem )
 from qgis.gui import ( QgsHighlight, QgsMessageBar ) 
 from qgis.core import (
   QgsProject, QGis,
@@ -112,7 +113,7 @@ class CatalogOTF:
     self.tempDir = "/tmp"
     self.layer = self.layerName = self.nameFieldSource = self.nameFieldDate = None
     self.ltgCatalog = self.ltgCatalogName = self.dicImages = None
-    self.funcOut = None
+    self.funcsOut = None
     self.featureImage = None
     self.zoomImage = self.highlightImage = self.selectedImage = False
     #
@@ -281,7 +282,7 @@ class CatalogOTF:
         self.msgBar.pushMessage( "Images invalid:\n%s" % msg, QgsMessageBar.CRITICAL, 5 )
         del l_error[:]
       else:
-        self.funcOut['changedTotalImages']( self.layer.id(), len( images ) )
+        self.funcsOut['changedTotal']( self.layer.id(), len( images ) )
 
     def setCurrentImage():
       sourceImage = self.dicImages[ self.featureImage.image() ]['source']
@@ -309,6 +310,7 @@ class CatalogOTF:
 
   def _setGroupCatalog(self):
     self.ltgCatalogName = "%s - Catalog" % self.layer.name()
+    self.funcsOut['changedNameGroup']( self.layer.id(), self.ltgCatalogName )
     self.ltgCatalog = self.ltgRoot.findGroup( self.ltgCatalogName  )
     if self.ltgCatalog is None:
       self.ltgCatalog = self.ltgRoot.addGroup( self.ltgCatalogName )
@@ -355,17 +357,17 @@ class CatalogOTF:
     if self.ltgCatalog == self.model.index2node( idBR ):
       name = self.ltgCatalog.name()
       if self.ltgCatalogName != name:
-        self.funcOut['changedNameGroup']( self.layer.id(), name )
+        self.funcsOut['changedNameGroup']( self.layer.id(), name )
         self.ltgCatalogName = name
     elif self.ltgRoot.findLayer( self.layer.id() ) == self.model.index2node( idBR ):
       name = self.layer.name()
       if self.layerName != name:
-        self.funcOut['changedNameLayer']( self.layer.id(), name )
+        self.funcsOut['changedNameLayer']( self.layer.id(), name )
         self.layerName = name
 
   def onLayersWillBeRemoved(self, layerIds):
     if self.layer.id() in layerIds:
-      self.funcOut['removedLayer']( self.layer.id() )
+      self.funcsOut['removedLayer']( self.layer.id() )
       self.removeLayerCatalog()
 
   def onWillRemoveChildren(self, node, indexFrom, indexTo):
@@ -375,7 +377,7 @@ class CatalogOTF:
     removeNode = node.children()[ indexFrom ]
     if removeNode == self.ltgCatalog:
       self.enable( False )
-      self.funcOut['removedGroup']( self.layer.id() )
+      self.funcsOut['removedGroup']( self.layer.id() )
 
   def onDestinationCrsChanged_MapUnitsChanged(self):
     self.onExtentsChangedMapCanvas()
@@ -455,7 +457,7 @@ class CatalogOTF:
     #
     return { 'nameSource': fieldSource, 'nameDate': fieldDate } if isOk else None 
 
-  def setLayerCatalog(self, layer, nameFiedlsCatalog, funcOut):
+  def setLayerCatalog(self, layer, nameFiedlsCatalog, funcsOut):
 
     def setDicImages():
       fr = QgsFeatureRequest()
@@ -474,11 +476,12 @@ class CatalogOTF:
 
     self.layer = layer
     self.layerName = layer.name()
-    self.funcOut = funcOut
+    self.funcsOut = funcsOut
     self.featureImage = FeatureImage( layer )
     self.nameFieldSource = nameFiedlsCatalog[ 'nameSource' ]
     self.nameFieldDate = nameFiedlsCatalog[ 'nameDate' ]
     setDicImages()
+    self.funcsOut['settedLayer']( self.layer.id(), self.layer.name() )
 
   def removeLayerCatalog(self):
     self.featureImage.clear()
@@ -490,8 +493,8 @@ class CatalogOTF:
     #
     self.layer = self.nameFieldSource = self.nameFieldDate =  None
 
-  def enable( self, onEnabled=True ):
-    if onEnabled:
+  def enable( self, on=True ):
+    if on:
       self._setGroupCatalog()
       self.ltgCatalogName = self.ltgCatalog.name()
       self._connect( True )
@@ -499,8 +502,7 @@ class CatalogOTF:
     else:
       self._connect( False )
     
-
-  def enableZoomImage(self, on=True):
+  def enableZoom(self, on=True):
     self.zoomImage = on
     if on and self._setFeatureImage( self.ltv.currentLayer() ): 
       ss = { 'signal': self.canvas.extentsChanged , 'slot': self.onExtentsChangedMapCanvas }
@@ -509,68 +511,168 @@ class CatalogOTF:
       ss['signal'].connect( ss['slot'] )
       self._populateGroupCatalog()
 
-  def enableHighlightImage(self, on=True):
+  def enableHighlight(self, on=True):
     self.highlightImage = on
     if on and self._setFeatureImage( self.ltv.currentLayer() ):
       self.featureImage.highlight( 3 )
 
-  def enableSelectedImage(self, on=True):
+  def enableSelected(self, on=True):
     self.selectedImage = on
     self._populateGroupCatalog()
 
 
+class TableCatalogOTF:
+
+  def __init__(self):
+    self.funcsOut = None
+    self.tableWidget = None
+    #
+    self._init()
+
+  def _init(self):
+    self.tableWidget = QTableWidget()
+    self.tableWidget.setWindowTitle("Catalog OTF")
+    self.tableWidget.setSortingEnabled( False )
+    headers = [ "Layer", "Group", "Total", "Select", "Highlight", "Zoom" ]
+    self.tableWidget.setColumnCount( len( headers ) )
+    self.tableWidget.setHorizontalHeaderLabels( headers )
+    self.tableWidget.resizeColumnsToContents()
+    self.tableWidget.itemChanged.connect( self.onItemChanged )
+
+  def _getLayerID(self, row ):
+    item = self.tableWidget.item( row, 0)
+    return item.data( Qt.UserRole )
+
+  def _getRowLayerID(self, layerID):
+    for row in range( self.tableWidget.rowCount() ):
+      if layerID == self._getLayerID( row ):
+        return row
+    return -1
+
+  def _changedText(self, layerID, name, column):
+    row = self._getRowLayerID( layerID )
+    if row != -1:
+      item = self.tableWidget.item( row, column )
+      item.setText( name )
+
+  def onItemChanged( self, item ):
+    namesFunc = {
+           0: 'checkedStateLayer',
+           3: 'checkedStateSelect',
+           4: 'checkedStateHighlight',
+           5: 'checkedStateZoom'
+         }
+    if not item.column() in ( namesFunc.keys() ):
+      return
+    #
+    self.funcsOut[ namesFunc[ item.column() ] ]( self._getLayerID( item.row() ), item.checkState() )
+
+  def setTableCatalog(self, funcsOut):
+    self.funcsOut = funcsOut
+
+  def insertRow(self, layerID, layerName):
+    self.tableWidget.itemChanged.disconnect( self.onItemChanged )
+    #
+    row = self.tableWidget.rowCount()
+    self.tableWidget.insertRow( row )
+    #
+    # "Layer", "Group", "Total", "Select", "Highlight", "Zoom" 
+    #
+    lenTexts = 3
+    #
+    column = 0 # Layer
+    item = QTableWidgetItem( layerName )
+    item.setFlags( Qt.ItemIsSelectable | Qt.ItemIsEnabled | Qt.ItemIsUserCheckable )
+    item.setCheckState(Qt.Unchecked)
+    item.setData( Qt.UserRole, layerID )
+    self.tableWidget.setItem( row, column, item )
+    #
+    for column in range( 1, lenTexts ):
+      item = QTableWidgetItem("None")
+      item.setFlags( Qt.ItemIsSelectable | Qt.ItemIsEnabled )
+      self.tableWidget.setItem( row, column, item )
+    # Check's
+    for column in range( lenTexts, self.tableWidget.columnCount() ):
+      item = QTableWidgetItem()
+      item.setFlags( Qt.ItemIsSelectable | Qt.ItemIsEnabled | Qt.ItemIsUserCheckable )
+      item.setCheckState(Qt.Unchecked)
+      self.tableWidget.setItem( row, column, item )
+    #
+    self.tableWidget.resizeColumnsToContents()
+    self.tableWidget.itemChanged.connect( self.onItemChanged )
+
+  def removeRow(self, layerID):
+    row = self._getRowLayerID( layerID )
+    if row != -1:
+      self.tableWidget.removeRow( row )
+
+  def changedNameLayer(self, layerID, name):
+    self.tableWidget.itemChanged.disconnect( self.onItemChanged )
+    self._changedText( layerID, name, 0 )
+    self.tableWidget.itemChanged.connect( self.onItemChanged )
+
+  def changedNameGroup(self, layerID, name=None):
+    if name is None:
+      name = "None"
+    self._changedText( layerID, name, 1 )
+
+  def changedTotal(self, layerID, total):
+    self._changedText( layerID, "%s" % total, 2 )
+
+  def show(self):
+    self.tableWidget.show()
+
+
 def init():
-  def changedCatalogNameLayer(layeID, name):
-    msg = "Change name Catalog(%s) Layer to '%s'" % ( layeID, name )
-    msgBar.pushMessage( msg, QgsMessageBar.INFO, 2 )
 
-  def removedCatalogLayer(layeID):
-    msg = "Catalog(%s) Layer removed" % ( layeID )
-    msgBar.pushMessage( msg, QgsMessageBar.INFO, 2 )
-  
-  def changedCatalogNameGroup(layeID, name):
-    msg = "Change name Catalog(%s) Group to '%s'" % ( layeID, name )
-    msgBar.pushMessage( msg, QgsMessageBar.INFO, 2 )
+  def checkedStateLayer(layerID, checkState):
+    on = True if checkState == Qt.Checked else False
+    cotf[ layerID ].enable( on )
+ 
+  def checkedStateSelect(layerID, checkState):
+    on = True if checkState == Qt.Checked else False
+    cotf[ layerID ].enableSelected( on )
 
-  def removedCatalogGroup(layeID):
-    msg = "Catalog(%s) Group removed" % ( layeID )
-    msgBar.pushMessage( msg, QgsMessageBar.INFO, 2 )
+  def checkedStateHighlight(layerID, checkState):
+    on = True if checkState == Qt.Checked else False
+    cotf[ layerID ].enableHighlight( on )
+   
+  def checkedStateZoom(layerID, checkState):
+    on = True if checkState == Qt.Checked else False
+    cotf[ layerID ].enableZoom( on )
 
-  def changeCatalogTotalImages(layeID, total):
-    msg = "Total images Catalog(%s) = %d'" % ( layeID, total )
-    msgBar.pushMessage( msg, QgsMessageBar.INFO, 2 )
-  
-  
-  funcOut = {
-      'changedNameLayer': changedCatalogNameLayer,
-      'removedLayer': removedCatalogLayer,
-      'changedNameGroup': changedCatalogNameGroup,
-      'removedGroup': removedCatalogGroup,
-      'changedTotalImages': changeCatalogTotalImages
+  funcsOut_tbl_cotf = {
+       'checkedStateLayer': checkedStateLayer,
+       'checkedStateSelect': checkedStateSelect,
+       'checkedStateHighlight': checkedStateHighlight,
+       'checkedStateZoom': checkedStateZoom
   }
-  msgBar = iface.messageBar()
-  #
-  
+
+  tbl_cotf = TableCatalogOTF()
+  funcsOut_cotf = {
+      'settedLayer': tbl_cotf.insertRow,
+      'removedLayer': tbl_cotf.removeRow,
+      'changedNameLayer': tbl_cotf.changedNameLayer,
+      'changedNameGroup': tbl_cotf.changedNameGroup,
+      'removedGroup': tbl_cotf.changedNameGroup,
+      'changedTotal': tbl_cotf.changedTotal
+  }
+
   layer = iface.activeLayer()
   nameFiedlsCatalog = CatalogOTF.getNameFieldsCatalog( layer )
   if nameFiedlsCatalog is None:
     print u"Selecione o layer de catalogo (Campos com endereço e data da imagem)"
     return None
-  cotf = CatalogOTF()
-  cotf.setLayerCatalog( layer, nameFiedlsCatalog, funcOut )
-  cotf.enable()
   #
-  return cotf
+  layerID = layer.id()
+  cotf = {} 
+  cotf[ layerID ] = CatalogOTF()
+  cotf[ layerID ].setLayerCatalog( layer, nameFiedlsCatalog, funcsOut_cotf )
+  #
+  tbl_cotf.setTableCatalog( funcsOut_tbl_cotf )
+  tbl_cotf.show()
 
-
-#
-#
 """
-execfile(u'/home/lmotta/data/qgis_script_console/addimage_by_extension/addimage_by_extension.py'.encode('UTF-8')); cotf = init()
-cotf.enableHighlightImage()
-cotf.enableZoomImage()
-cotf.enableSelectedImage()
-cotf.enable( False )
-cotf = None
-
+execfile(u'/home/lmotta/data/qgis_script_console/addimage_by_extension/addimage_by_extension.py'.encode('UTF-8'))
+init()
 """
