@@ -1,6 +1,11 @@
-# Only the file addimage_by_extension.py will be not ignored
+# All Files
 *
-!addimage_by_extension.py
-!README.md
+# Minus 
+!*.py
 !.gitignore
-
+!catalogotf.svg
+!resources_rc.qrc
+!metadata.txt
+!README.md
+!LICENSE
+!create_zip_plugin.sh
