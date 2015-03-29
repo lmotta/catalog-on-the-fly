@@ -46,7 +46,10 @@ class CatalogOTFPlugin:
     self.iface.removePluginMenu( self.name, self.action )
     self.iface.removeToolBarIcon( self.action )
     del self.action
-
+    if not self.dock is None:
+      self.dock.close()
+  
+  @pyqtSlot()
   def run(self):
     if self.dock is None:
       self.dock = DockWidgetCatalogOTF( self.iface )
@@ -56,5 +59,7 @@ class CatalogOTFPlugin:
       self.dock.close()
       self.dock = None
 
+  @pyqtSlot()
   def _noneDock(self):
+    self.dock.disconnect( self.dock, SIGNAL( "closed(PyQt_PyObject)" ), self._noneDock )
     self.dock = None

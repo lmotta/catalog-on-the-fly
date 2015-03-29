@@ -119,14 +119,14 @@ class CatalogOTF(QObject):
 
   def _connect(self, isConnect = True):
     ss = [
-      { 'signal': self.canvas.extentsChanged , 'slot': self.onExtentsChangedMapCanvas },
-      { 'signal': self.canvas.destinationCrsChanged, 'slot': self.onDestinationCrsChanged_MapUnitsChanged },
-      { 'signal': self.canvas.mapUnitsChanged, 'slot': self.onDestinationCrsChanged_MapUnitsChanged },
-      { 'signal': self.layer.selectionChanged, 'slot': self.onSelectionChanged },
-      { 'signal': self.ltv.activated, 'slot': self.onActivated   },
-      { 'signal': self.model.dataChanged, 'slot': self.onDataChanged   },
-      { 'signal': QgsMapLayerRegistry.instance().layersWillBeRemoved , 'slot': self.onLayersWillBeRemoved   },
-      { 'signal': self.ltgRoot.willRemoveChildren, 'slot': self.onWillRemoveChildren  }
+      { 'signal': self.canvas.extentsChanged , 'slot': self.extentsChangedMapCanvas },
+      { 'signal': self.canvas.destinationCrsChanged, 'slot': self.destinationCrsChanged_MapUnitsChanged },
+      { 'signal': self.canvas.mapUnitsChanged, 'slot': self.destinationCrsChanged_MapUnitsChanged },
+      { 'signal': self.layer.selectionChanged, 'slot': self.selectionChanged },
+      { 'signal': self.ltv.activated, 'slot': self.activated   },
+      { 'signal': self.model.dataChanged, 'slot': self.dataChanged   },
+      { 'signal': QgsMapLayerRegistry.instance().layersWillBeRemoved , 'slot': self.layersWillBeRemoved   },
+      { 'signal': self.ltgRoot.willRemoveChildren, 'slot': self.willRemoveChildren  }
     ]
     if isConnect:
       for item in ss:
@@ -292,7 +292,7 @@ class CatalogOTF(QObject):
         if not cslc is None and cslc['source'] == layer.source():
           ltl.setVisible( cslc['visible'] ) 
 
-    ss = { 'signal': self.ltv.activated , 'slot': self.onActivated   }
+    ss = { 'signal': self.ltv.activated , 'slot': self.activated   }
     ss['signal'].disconnect( ss['slot'] )
     #
     cslc = getCurrentStatusLayerCatalog()
@@ -313,7 +313,8 @@ class CatalogOTF(QObject):
     if self.ltgCatalog is None:
       self.ltgCatalog = self.ltgRoot.addGroup( self.ltgCatalogName )
 
-  def onExtentsChangedMapCanvas(self):
+  @pyqtSlot()
+  def extentsChangedMapCanvas(self):
     if self.layer is None:
       self.msgBar.pushMessage( "Need define layer catalog", QgsMessageBar.WARNING, 2 )
       return
@@ -323,7 +324,8 @@ class CatalogOTF(QObject):
     if self.highlightImage:
       self.featureImage.highlight( 3 )
 
-  def onActivated(self, index ):
+  @pyqtSlot( 'QModelIndex' )
+  def activated(self, index ):
     if self.layer is None:
       self.msgBar.pushMessage( "Need define layer catalog", QgsMessageBar.WARNING, 2 )
       return
@@ -339,7 +341,7 @@ class CatalogOTF(QObject):
       return
     #
     if self.zoomImage:
-      ss = { 'signal': self.canvas.extentsChanged , 'slot': self.onExtentsChangedMapCanvas }
+      ss = { 'signal': self.canvas.extentsChanged , 'slot': self.extentsChangedMapCanvas }
       ss['signal'].disconnect( ss['slot'] )
       self.featureImage.zoom()
       ss['signal'].connect( ss['slot'] )
@@ -348,7 +350,8 @@ class CatalogOTF(QObject):
     if self.highlightImage:
       self.featureImage.highlight( 3 )
 
-  def onDataChanged(self, idTL, idBR):
+  @pyqtSlot( 'QModelIndex', 'QModelIndex' )
+  def dataChanged(self, idTL, idBR):
     if idTL != idBR:
       return
     #
@@ -363,12 +366,14 @@ class CatalogOTF(QObject):
         self.changedNameLayer.emit( self.layer.id(), name )
         self.layerName = name
 
-  def onLayersWillBeRemoved(self, layerIds):
+  @pyqtSlot( list )
+  def layersWillBeRemoved(self, layerIds):
     if self.layer.id() in layerIds:
       self.removedLayer.emit( self.layer.id() )
       self.removeLayerCatalog()
 
-  def onWillRemoveChildren(self, node, indexFrom, indexTo):
+  @pyqtSlot( 'QgsLayerTreeNode', int, int )
+  def willRemoveChildren(self, node, indexFrom, indexTo):
     if node == self.ltgCatalog: 
       return
     #
@@ -377,10 +382,12 @@ class CatalogOTF(QObject):
       self.enable( False )
       self.removedGroup.emit( self.layer.id() )
 
-  def onDestinationCrsChanged_MapUnitsChanged(self):
-    self.onExtentsChangedMapCanvas()
+  @pyqtSlot()
+  def destinationCrsChanged_MapUnitsChanged(self):
+    self.extentsChangedMapCanvas()
 
-  def onSelectionChanged(self):
+  @pyqtSlot()
+  def selectionChanged(self):
     if self.selectedImage:
       self._populateGroupCatalog()
 
@@ -495,14 +502,14 @@ class CatalogOTF(QObject):
       self._setGroupCatalog()
       self.ltgCatalogName = self.ltgCatalog.name()
       self._connect( True )
-      self.onExtentsChangedMapCanvas()
+      self.extentsChangedMapCanvas()
     else:
       self._connect( False )
     
   def enableZoom(self, on=True):
     self.zoomImage = on
     if on and self._setFeatureImage( self.ltv.currentLayer() ): 
-      ss = { 'signal': self.canvas.extentsChanged , 'slot': self.onExtentsChangedMapCanvas }
+      ss = { 'signal': self.canvas.extentsChanged , 'slot': self.extentsChangedMapCanvas }
       ss['signal'].disconnect( ss['slot'] )
       self.featureImage.zoom()
       ss['signal'].connect( ss['slot'] )
@@ -619,7 +626,7 @@ class TableCatalogOTF(QObject):
 
   @pyqtSlot( str, int )
   def changedTotal(self, layerID, total):
-    self._changedText( layerID, "%s" % total, 2 )
+    self._changedText( layerID, str( total ), 2 )
 
   def widget(self):
     return self.tableWidget
@@ -673,28 +680,41 @@ class DockWidgetCatalogOTF(QDockWidget):
     on = True if checkState == Qt.Checked else False
     checkBoxs[ nameCheckBox ]( on )
 
+  @pyqtSlot( str )
+  def removeLayer(self, layerID):
+    del self.cotf[ layerID ]
+
   @pyqtSlot()
   def findCatalogs(self):
 
     def connectCatalogOTF(layerID):
       self.cotf[ layerID ].settedLayer.connect( self.tbl_cotf.insertRow )
       self.cotf[ layerID ].removedLayer.connect( self.tbl_cotf.removeRow )
+      self.cotf[ layerID ].removedLayer.connect( self.removeLayer )
       self.cotf[ layerID ].changedNameLayer.connect( self.tbl_cotf.changedNameLayer )
       self.cotf[ layerID ].changedNameGroup.connect( self.tbl_cotf.changedNameGroup )
       self.cotf[ layerID ].removedGroup.connect( self.tbl_cotf.changedNameGroup )
       self.cotf[ layerID ].changedTotal.connect( self.tbl_cotf.changedTotal )
 
     find = False
-    for layer in filter( lambda item: item.type() == QgsMapLayer.VectorLayer and item.geometryType() == QGis.Polygon, self.iface.legendInterface().layers() ):
-      nameFiedlsCatalog = CatalogOTF.getNameFieldsCatalog( layer )
-      layerID = layer.id()
-      if not layerID in self.cotf.keys() and not nameFiedlsCatalog is None:
+    f = lambda item: \
+        item.type() == QgsMapLayer.VectorLayer and \
+        item.geometryType() == QGis.Polygon and \
+        not item.id() in self.cotf.keys()
+    for item in filter( f, self.iface.legendInterface().layers() ):
+      nameFiedlsCatalog = CatalogOTF.getNameFieldsCatalog( item )
+      if not nameFiedlsCatalog is None:
+        layerID = item.id()
         self.cotf[ layerID ] = CatalogOTF( self.iface )
         connectCatalogOTF( layerID )
-        self.cotf[ layerID ].setLayerCatalog( layer, nameFiedlsCatalog )
+        self.cotf[ layerID ].setLayerCatalog( item, nameFiedlsCatalog )
         find = True
     #
     if not find:
       msgBar = self.iface.messageBar()
-      msgBar.pushMessage( "Did not find a new catalog (total existing  %d)" % len( self.cotf ), QgsMessageBar.INFO, 3 )
-
+      f = lambda item: \
+          item.type() == QgsMapLayer.VectorLayer and \
+          item.geometryType() == QGis.Polygon
+      totalLayers = len( filter( f, self.iface.legendInterface().layers() ) )
+      msg = "Did not find a new catalog. Catalog layers %d of %d(polygon layers)" % ( len( self.cotf ), totalLayers ) 
+      msgBar.pushMessage( msg, QgsMessageBar.INFO, 3 )
