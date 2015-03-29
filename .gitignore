@@ -1,11 +1,14 @@
-# All Files
+# All Files ignore
 *
-# Minus 
-!*.py
-!.gitignore
+# Minus these
+# 1) Python Files
+!__init__.py
+!catalogotf.py
+# 2) Resources
 !catalogotf.svg
 !resources_rc.qrc
 !metadata.txt
 !README.md
 !LICENSE
 !create_zip_plugin.sh
+!.gitignore
