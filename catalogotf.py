@@ -5,7 +5,7 @@ import urllib2
 from datetime import datetime
 from os.path import basename
 
-from PyQt4.QtCore import ( Qt, QObject, QTimer, QFileInfo, QVariant, QPyNullVariant, pyqtSignal, pyqtSlot, SIGNAL )
+from PyQt4.QtCore import ( Qt, QObject, QTimer, QFileInfo, QVariant, QPyNullVariant, pyqtSignal, pyqtSlot )
 from PyQt4.QtGui  import ( QTableWidget, QTableWidgetItem, QPushButton, QGridLayout, QDockWidget, QWidget )
 
 from qgis.gui import ( QgsHighlight, QgsMessageBar ) 
@@ -579,6 +579,7 @@ class TableCatalogOTF(QObject):
       #
       item = self.tableWidget.item( row, column )
       item.setText( name )
+      item.setToolTip( name )
       #
       ss['signal'].connect( ss['slot'] )
 
@@ -621,6 +622,7 @@ class TableCatalogOTF(QObject):
     item.setFlags( Qt.ItemIsSelectable | Qt.ItemIsEnabled | Qt.ItemIsUserCheckable )
     item.setCheckState(Qt.Unchecked)
     item.setData( Qt.UserRole, layerID )
+    item.setToolTip( layerName )
     self.tableWidget.setItem( row, column, item )
     #
     for column in range( 1, lenTexts ):
@@ -703,11 +705,6 @@ class DockWidgetCatalogOTF(QDockWidget):
     self.tbl_cotf.checkedState.connect( self.checkedState )
     #
     setupUi()
-
-  def closeEvent(self, event):
-    self.widget().close()
-    self.emit( SIGNAL( "closed(PyQt_PyObject)" ), self )
-    return QDockWidget.closeEvent(self, event)
 
   @pyqtSlot( str, str, int )
   def checkedState(self, layerID, nameCheckBox, checkState):

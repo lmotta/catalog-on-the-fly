@@ -20,7 +20,7 @@ email                : motta.luiz@gmail.com
 """
 
 from PyQt4.QtGui import ( QAction, QIcon )
-from PyQt4.QtCore import ( Qt, SIGNAL, pyqtSlot )
+from PyQt4.QtCore import ( Qt, pyqtSlot )
 
 from catalogotf import DockWidgetCatalogOTF
 
@@ -36,7 +36,7 @@ class CatalogOTFPlugin:
 
   def initGui(self):
     import resources_rc # pyrcc4 -o resources_rc.py  resources_rc.qrc
-    self.action = QAction( QIcon(":/plugins/catalogotf_plugin/catalogotf.svg"), u"Catalog on the fly Plugin", self.iface.mainWindow() )
+    self.action = QAction( QIcon(":/plugins/catalogotf_plugin/catalogotf.svg"), u"Catalog on the fly", self.iface.mainWindow() )
     self.action.triggered.connect( self.run )
     #
     self.iface.addToolBarIcon( self.action )
@@ -46,20 +46,11 @@ class CatalogOTFPlugin:
     self.iface.removePluginMenu( self.name, self.action )
     self.iface.removeToolBarIcon( self.action )
     del self.action
-    if not self.dock is None:
-      self.dock.close()
+    del self.dock
   
   @pyqtSlot()
   def run(self):
-    if self.dock is None:
-      self.dock = DockWidgetCatalogOTF( self.iface )
-      self.dock.connect( self.dock, SIGNAL( "closed(PyQt_PyObject)" ), self._noneDock )
-      self.iface.addDockWidget( Qt.LeftDockWidgetArea , self.dock )
-    else:
-      self.dock.close()
-      self.dock = None
-
-  @pyqtSlot()
-  def _noneDock(self):
-    self.dock.disconnect( self.dock, SIGNAL( "closed(PyQt_PyObject)" ), self._noneDock )
-    self.dock = None
+    self.dock = DockWidgetCatalogOTF( self.iface ) 
+    self.iface.addDockWidget( Qt.LeftDockWidgetArea , self.dock )
+    self.action.setEnabled( False )
+    
