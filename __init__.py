@@ -20,7 +20,7 @@ email                : motta.luiz@gmail.com
 """
 
 from PyQt4.QtGui import ( QAction, QIcon )
-from PyQt4.QtCore import ( Qt, SIGNAL )
+from PyQt4.QtCore import ( Qt, SIGNAL, pyqtSlot )
 
 from catalogotf import DockWidgetCatalogOTF
 

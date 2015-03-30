@@ -103,7 +103,16 @@ class CatalogOTF(QObject):
   removedGroup = pyqtSignal( str )
   changedTotal = pyqtSignal( str, int )
 
-  def __init__(self, iface):
+  def __init__(self, iface, tableCOTF):
+    
+    def connecTableCOTF():
+      self.settedLayer.connect( tableCOTF.insertRow )
+      self.removedLayer.connect( tableCOTF.removeRow )
+      self.changedNameLayer.connect( tableCOTF.changedNameLayer )
+      self.changedNameGroup.connect( tableCOTF.changedNameGroup )
+      self.removedGroup.connect( tableCOTF.changedNameGroup )
+      self.changedTotal.connect( tableCOTF.changedTotal )
+    
     super(CatalogOTF, self).__init__()
     self.iface = iface
     self.canvas = iface.mapCanvas()
@@ -112,6 +121,7 @@ class CatalogOTF(QObject):
     self.ltgRoot = QgsProject.instance().layerTreeRoot()
     self.msgBar = iface.messageBar()
     self.tempDir = "/tmp"
+    connecTableCOTF()
     self.layer = self.layerName = self.nameFieldSource = self.nameFieldDate = None
     self.ltgCatalog = self.ltgCatalogName = self.dicImages = None
     self.featureImage = None
@@ -119,7 +129,7 @@ class CatalogOTF(QObject):
 
   def _connect(self, isConnect = True):
     ss = [
-      { 'signal': self.canvas.extentsChanged , 'slot': self.extentsChangedMapCanvas },
+      { 'signal': self.canvas.extentsChanged , 'slot': self.extentsChanged },
       { 'signal': self.canvas.destinationCrsChanged, 'slot': self.destinationCrsChanged_MapUnitsChanged },
       { 'signal': self.canvas.mapUnitsChanged, 'slot': self.destinationCrsChanged_MapUnitsChanged },
       { 'signal': self.layer.selectionChanged, 'slot': self.selectionChanged },
@@ -314,7 +324,7 @@ class CatalogOTF(QObject):
       self.ltgCatalog = self.ltgRoot.addGroup( self.ltgCatalogName )
 
   @pyqtSlot()
-  def extentsChangedMapCanvas(self):
+  def extentsChanged(self):
     if self.layer is None:
       self.msgBar.pushMessage( "Need define layer catalog", QgsMessageBar.WARNING, 2 )
       return
@@ -341,7 +351,7 @@ class CatalogOTF(QObject):
       return
     #
     if self.zoomImage:
-      ss = { 'signal': self.canvas.extentsChanged , 'slot': self.extentsChangedMapCanvas }
+      ss = { 'signal': self.canvas.extentsChanged , 'slot': self.extentsChanged }
       ss['signal'].disconnect( ss['slot'] )
       self.featureImage.zoom()
       ss['signal'].connect( ss['slot'] )
@@ -384,7 +394,7 @@ class CatalogOTF(QObject):
 
   @pyqtSlot()
   def destinationCrsChanged_MapUnitsChanged(self):
-    self.extentsChangedMapCanvas()
+    self.extentsChanged()
 
   @pyqtSlot()
   def selectionChanged(self):
@@ -502,14 +512,14 @@ class CatalogOTF(QObject):
       self._setGroupCatalog()
       self.ltgCatalogName = self.ltgCatalog.name()
       self._connect( True )
-      self.extentsChangedMapCanvas()
+      self.extentsChanged()
     else:
       self._connect( False )
     
   def enableZoom(self, on=True):
     self.zoomImage = on
     if on and self._setFeatureImage( self.ltv.currentLayer() ): 
-      ss = { 'signal': self.canvas.extentsChanged , 'slot': self.extentsChangedMapCanvas }
+      ss = { 'signal': self.canvas.extentsChanged , 'slot': self.extentsChanged }
       ss['signal'].disconnect( ss['slot'] )
       self.featureImage.zoom()
       ss['signal'].connect( ss['slot'] )
@@ -531,7 +541,7 @@ class TableCatalogOTF(QObject):
   checkedState = pyqtSignal( str, str, int )
 
   def __init__(self):
-    super(TableCatalogOTF, self).__init__()
+    super( TableCatalogOTF, self ).__init__()
     self.tableWidget = QTableWidget()
     self._init()
 
@@ -542,6 +552,7 @@ class TableCatalogOTF(QObject):
     self.tableWidget.setColumnCount( len( headers ) )
     self.tableWidget.setHorizontalHeaderLabels( headers )
     self.tableWidget.resizeColumnsToContents()
+    #
     self.tableWidget.itemChanged.connect( self.itemChanged )
 
   def _getLayerID(self, row ):
@@ -554,11 +565,22 @@ class TableCatalogOTF(QObject):
         return row
     return -1
 
+  def setFlagsByCheck(self, row, check, columns):
+    ff = ( lambda f: f | Qt.ItemIsEnabled ) if check == Qt.Checked else ( lambda f: f ^ Qt.ItemIsEnabled )
+    for column in columns:
+      item = self.tableWidget.item( row, column)
+      item.setFlags( ff( item.flags() ) )
+
   def _changedText(self, layerID, name, column):
     row = self._getRowLayerID( layerID )
     if row != -1:
+      ss = { 'signal': self.tableWidget.itemChanged , 'slot': self.itemChanged   }
+      ss['signal'].disconnect( ss['slot'] )
+      #
       item = self.tableWidget.item( row, column )
       item.setText( name )
+      #
+      ss['signal'].connect( ss['slot'] )
 
   @pyqtSlot( 'QTableWidgetItem' )
   def itemChanged( self, item ):
@@ -572,11 +594,20 @@ class TableCatalogOTF(QObject):
     if not column in ( checkBoxs.keys() ):
       return
     #
-    self.checkedState.emit( self._getLayerID( item.row() ), checkBoxs[ column ], item.checkState() )
+    row = item.row()
+    check = item.checkState()
+    if column == 0:
+      ss = { 'signal': self.tableWidget.itemChanged , 'slot': self.itemChanged   }
+      ss['signal'].disconnect( ss['slot'] )
+      self.setFlagsByCheck( row, check, range(3, 6, 1) )
+      ss['signal'].connect( ss['slot'] )
+    #
+    self.checkedState.emit( self._getLayerID( row ), checkBoxs[ column ], check )
 
   @pyqtSlot( str, str )
   def insertRow(self, layerID, layerName):
-    self.tableWidget.itemChanged.disconnect( self.itemChanged )
+    ss = { 'signal': self.tableWidget.itemChanged , 'slot': self.itemChanged   }
+    ss['signal'].disconnect( ss['slot'] )
     #
     row = self.tableWidget.rowCount()
     self.tableWidget.insertRow( row )
@@ -599,12 +630,12 @@ class TableCatalogOTF(QObject):
     # Check's
     for column in range( lenTexts, self.tableWidget.columnCount() ):
       item = QTableWidgetItem()
-      item.setFlags( Qt.ItemIsSelectable | Qt.ItemIsEnabled | Qt.ItemIsUserCheckable )
+      item.setFlags( Qt.ItemIsSelectable | Qt.ItemIsUserCheckable )
       item.setCheckState(Qt.Unchecked)
       self.tableWidget.setItem( row, column, item )
     #
     self.tableWidget.resizeColumnsToContents()
-    self.tableWidget.itemChanged.connect( self.itemChanged )
+    ss['signal'].connect( ss['slot'] )
 
   @pyqtSlot( str )
   def removeRow(self, layerID):
@@ -614,14 +645,23 @@ class TableCatalogOTF(QObject):
 
   @pyqtSlot( str, str )
   def changedNameLayer(self, layerID, name):
-    self.tableWidget.itemChanged.disconnect( self.itemChanged )
     self._changedText( layerID, name, 0 )
-    self.tableWidget.itemChanged.connect( self.itemChanged )
-
+    
   @pyqtSlot( str, str )
   def changedNameGroup(self, layerID, name=None):
+
+    def uncheckedLayer():
+      row = self._getRowLayerID( layerID )
+      if row != -1:
+        ss = { 'signal': self.tableWidget.itemChanged , 'slot': self.itemChanged   }
+        ss['signal'].disconnect( ss['slot'] )
+        self.tableWidget.item( row, 0 ).setCheckState( Qt.Unchecked )
+        self.setFlagsByCheck( row, Qt.Unchecked, range(3, 6, 1) )
+        ss['signal'].connect( ss['slot'] )
+    #
     if name is None:
       name = "None"
+      uncheckedLayer()
     self._changedText( layerID, name, 1 )
 
   @pyqtSlot( str, int )
@@ -686,16 +726,6 @@ class DockWidgetCatalogOTF(QDockWidget):
 
   @pyqtSlot()
   def findCatalogs(self):
-
-    def connectCatalogOTF(layerID):
-      self.cotf[ layerID ].settedLayer.connect( self.tbl_cotf.insertRow )
-      self.cotf[ layerID ].removedLayer.connect( self.tbl_cotf.removeRow )
-      self.cotf[ layerID ].removedLayer.connect( self.removeLayer )
-      self.cotf[ layerID ].changedNameLayer.connect( self.tbl_cotf.changedNameLayer )
-      self.cotf[ layerID ].changedNameGroup.connect( self.tbl_cotf.changedNameGroup )
-      self.cotf[ layerID ].removedGroup.connect( self.tbl_cotf.changedNameGroup )
-      self.cotf[ layerID ].changedTotal.connect( self.tbl_cotf.changedTotal )
-
     find = False
     f = lambda item: \
         item.type() == QgsMapLayer.VectorLayer and \
@@ -705,8 +735,8 @@ class DockWidgetCatalogOTF(QDockWidget):
       nameFiedlsCatalog = CatalogOTF.getNameFieldsCatalog( item )
       if not nameFiedlsCatalog is None:
         layerID = item.id()
-        self.cotf[ layerID ] = CatalogOTF( self.iface )
-        connectCatalogOTF( layerID )
+        self.cotf[ layerID ] = CatalogOTF( self.iface, self.tbl_cotf )
+        self.cotf[ layerID ].removedLayer.connect( self.removeLayer )
         self.cotf[ layerID ].setLayerCatalog( item, nameFiedlsCatalog )
         find = True
     #
