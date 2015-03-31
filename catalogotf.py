@@ -1,5 +1,23 @@
-#!/usr/local/bin/python
 # -*- coding: utf-8 -*-
+"""
+/***************************************************************************
+Name                 : Catalog on the fly
+Description          : Automatically adds  images that are in the catalog layer that intersect with the map area.
+Date                 : April, 2015
+copyright            : (C) 2015 by Luiz Motta
+email                : motta.luiz@gmail.com
+
+ ***************************************************************************/
+
+/***************************************************************************
+ *                                                                         *
+ *   This program is free software; you can redistribute it and/or modify  *
+ *   it under the terms of the GNU General Public License as published by  *
+ *   the Free Software Foundation; either version 2 of the License, or     *
+ *   (at your option) any later version.                                   *
+ *                                                                         *
+ ***************************************************************************/
+"""
 
 import urllib2
 from datetime import datetime
