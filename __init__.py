@@ -37,10 +37,13 @@ class CatalogOTFPlugin:
   def initGui(self):
     import resources_rc # pyrcc4 -o resources_rc.py  resources_rc.qrc
     self.action = QAction( QIcon(":/plugins/catalogotf_plugin/catalogotf.svg"), u"Catalog on the fly", self.iface.mainWindow() )
+    self.action.setObjectName("CatalogOTF")
+    self.action.setWhatsThis(u"Catalog on the fly")
+    self.action.setStatusTip(u"Catalog on the fly")
     self.action.triggered.connect( self.run )
     #
     self.iface.addToolBarIcon( self.action )
-    self.iface.addPluginToMenu( self.name, self.action )
+    self.iface.addPluginToRasterMenu( self.name, self.action )
 
   def unload(self):
     self.iface.removePluginMenu( self.name, self.action )
