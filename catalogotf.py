@@ -121,7 +121,10 @@ class CatalogOTF(QObject):
     self.ltgRoot = QgsProject.instance().layerTreeRoot()
     self.msgBar = iface.messageBar()
     self.tempDir = "/tmp"
+    #
     connecTableCOTF()
+    QgsMapLayerRegistry.instance().layersWillBeRemoved.connect( self.layersWillBeRemoved ) # Catalog layer removed
+    #
     self.layer = self.layerName = self.nameFieldSource = self.nameFieldDate = None
     self.ltgCatalog = self.ltgCatalogName = self.dicImages = None
     self.featureImage = None
@@ -135,7 +138,6 @@ class CatalogOTF(QObject):
       { 'signal': self.layer.selectionChanged, 'slot': self.selectionChanged },
       { 'signal': self.ltv.activated, 'slot': self.activated   },
       { 'signal': self.model.dataChanged, 'slot': self.dataChanged   },
-      { 'signal': QgsMapLayerRegistry.instance().layersWillBeRemoved , 'slot': self.layersWillBeRemoved   },
       { 'signal': self.ltgRoot.willRemoveChildren, 'slot': self.willRemoveChildren  }
     ]
     if isConnect:
@@ -664,6 +666,7 @@ class TableCatalogOTF(QObject):
     if name is None:
       name = "None"
       uncheckedLayer()
+      self._changedText( layerID, name, 2 )
     self._changedText( layerID, name, 1 )
 
   @pyqtSlot( str, int )
