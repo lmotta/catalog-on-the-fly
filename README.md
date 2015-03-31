@@ -13,3 +13,6 @@ Create plugin, refactory and rename 'addimage_by_extension.py' for 'catalogotf.p
 
 ## Sponsor
 IBAMA (Brazilian Institute of Environment and Renewable Natural Resources)
+
+## Development's Plugin  download (nightly build)
+[Catalog On the fly] (https://www.dropbox.com/s/0j7kuvcr0aubuqk/catalogotf_plugin.zip?dl=0)

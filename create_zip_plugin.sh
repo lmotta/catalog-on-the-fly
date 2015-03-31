@@ -8,3 +8,7 @@ cp *.py $plugin_dir
 for item in "catalogotf.svg resources_rc.qrc metadata.txt README.md LICENSE"; do cp $item $plugin_dir; done
 zip -r $plugin_dir $plugin_dir
 rm -r $plugin_dir
+#
+kdialog --msgbox "Zip file created: "$plugin_dir".zip"
+
+
