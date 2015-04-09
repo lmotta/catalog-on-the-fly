@@ -154,9 +154,9 @@ class CatalogOTF(QObject):
       { 'signal': self.canvas.destinationCrsChanged, 'slot': self.destinationCrsChanged_MapUnitsChanged },
       { 'signal': self.canvas.mapUnitsChanged, 'slot': self.destinationCrsChanged_MapUnitsChanged },
       { 'signal': self.layer.selectionChanged, 'slot': self.selectionChanged },
-      { 'signal': self.ltv.activated, 'slot': self.activated   },
-      { 'signal': self.model.dataChanged, 'slot': self.dataChanged   },
-      { 'signal': self.ltgRoot.willRemoveChildren, 'slot': self.willRemoveChildren  }
+      { 'signal': self.ltv.activated, 'slot': self.activated },
+      { 'signal': self.model.dataChanged, 'slot': self.dataChanged },
+      { 'signal': self.ltgRoot.willRemoveChildren, 'slot': self.willRemoveChildren }
     ]
     if isConnect:
       for item in ss:
@@ -354,7 +354,16 @@ class CatalogOTF(QObject):
       self.msgBar.pushMessage( "Need define layer catalog", QgsMessageBar.WARNING, 2 )
       return
     #
+    renderFlag = self.canvas.renderFlag()
+    if renderFlag:
+      self.canvas.setRenderFlag( False )
+      self.canvas.stopRendering()
+    #
     self._populateGroupCatalog()
+    #
+    if renderFlag:
+      self.canvas.setRenderFlag( True )
+      self.canvas.refresh()
     #
     if self.highlightImage:
       self.featureImage.highlight( 3 )
