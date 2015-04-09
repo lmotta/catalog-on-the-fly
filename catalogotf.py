@@ -24,7 +24,7 @@ from datetime import datetime
 from os.path import basename
 
 from PyQt4.QtCore import ( Qt, QObject, QTimer, QFileInfo, QVariant, QPyNullVariant, pyqtSignal, pyqtSlot )
-from PyQt4.QtGui  import ( QTableWidget, QTableWidgetItem, QPushButton, QGridLayout, QDockWidget, QWidget )
+from PyQt4.QtGui  import ( QTableWidget, QTableWidgetItem, QPushButton, QGridLayout, QProgressBar, QDockWidget, QWidget )
 
 from qgis.gui import ( QgsHighlight, QgsMessageBar ) 
 from qgis.core import (
@@ -119,7 +119,7 @@ class CatalogOTF(QObject):
   changedNameLayer = pyqtSignal( str, str )
   changedNameGroup = pyqtSignal( str, str )
   removedGroup = pyqtSignal( str )
-  changedTotal = pyqtSignal( str, int )
+  changedTotal = pyqtSignal( str, str )
 
   def __init__(self, iface, tableCOTF):
     
@@ -228,7 +228,9 @@ class CatalogOTF(QObject):
       it = self.layer.getFeatures( fr ) 
       f = QgsFeature()
       while it.nextFeature( f ):
-        if f.geometry().intersects( rectCanvas ):
+        geom = f.geometry() 
+        bb = geom.boundingBox()
+        if bb.contains( rectCanvas ) or rectCanvas.contains( bb ) or geom.intersects( rectCanvas ):
           images.append( basename( f[ self.nameFieldSource ] ) )
       #
       del fids[:]
@@ -310,7 +312,8 @@ class CatalogOTF(QObject):
         self.msgBar.pushMessage( "Images invalid:\n%s" % msg, QgsMessageBar.CRITICAL, 5 )
         del l_error[:]
       else:
-        self.changedTotal.emit( self.layer.id(), len( images ) )
+        value = str( len( images ) )
+        self.changedTotal.emit( self.layer.id(), value )
 
     def setCurrentImage():
       sourceImage = self.dicImages[ self.featureImage.image() ]['source']
@@ -324,6 +327,8 @@ class CatalogOTF(QObject):
 
     ss = { 'signal': self.ltv.activated , 'slot': self.activated   }
     ss['signal'].disconnect( ss['slot'] )
+    #
+    self.changedTotal.emit( self.layer.id(), "Calculating..." )
     #
     cslc = getCurrentStatusLayerCatalog()
     #
@@ -687,9 +692,9 @@ class TableCatalogOTF(QObject):
       self._changedText( layerID, name, 2 )
     self._changedText( layerID, name, 1 )
 
-  @pyqtSlot( str, int )
-  def changedTotal(self, layerID, total):
-    self._changedText( layerID, str( total ), 2 )
+  @pyqtSlot( str, str )
+  def changedTotal(self, layerID, value):
+    self._changedText( layerID, value, 2 )
 
   def widget(self):
     return self.tableWidget
@@ -706,6 +711,7 @@ class DockWidgetCatalogOTF(QDockWidget):
       #
       gridLayout = QGridLayout( wgt )
       gridLayout.setContentsMargins( 0, 0, gridLayout.verticalSpacing(), gridLayout.verticalSpacing() )
+      #
       tbl = self.tbl_cotf.widget()
       ( iniY, iniX, spanY, spanX ) = ( 0, 0, 1, 2 )
       gridLayout.addWidget( tbl, iniY, iniX, spanY, spanX )
