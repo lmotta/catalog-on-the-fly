@@ -230,7 +230,7 @@ class CatalogOTF(QObject):
       while it.nextFeature( f ):
         geom = f.geometry() 
         bb = geom.boundingBox()
-        if bb.contains( rectCanvas ) or rectCanvas.contains( bb ) or geom.intersects( rectCanvas ):
+        if geom.intersects( rectCanvas ):
           images.append( basename( f[ self.nameFieldSource ] ) )
       #
       del fids[:]
