@@ -24,8 +24,12 @@ from datetime import datetime
 from os.path import basename
 
 from PyQt4.QtCore import ( Qt, QObject, QTimer, QFileInfo, QVariant, QPyNullVariant, pyqtSignal, pyqtSlot )
-from PyQt4.QtGui  import ( QTableWidget, QTableWidgetItem, QPushButton, QGridLayout, QProgressBar, QDockWidget, QWidget )
-
+from PyQt4.QtGui  import (
+     QApplication,  QCursor,
+     QTableWidget, QTableWidgetItem,
+     QPushButton, QGridLayout, QProgressBar, QDockWidget, QWidget
+)
+ 
 from qgis.gui import ( QgsHighlight, QgsMessageBar ) 
 from qgis.core import (
   QgsProject, QGis,
@@ -36,6 +40,7 @@ from qgis.core import (
   QgsLayerTreeNode
 )
 
+NAME_PLUGIN = "Catalog On The Fly"
 
 class FeatureImage:
 
@@ -176,12 +181,12 @@ class CatalogOTF(QObject):
     image = basename( layer.source() )
     if not image in self.dicImages .keys():
       msg = "Image (%s) not in catalog layer ('%s')" % ( image, self.layer.name() )
-      self.msgBar.pushMessage( msg, QgsMessageBar.CRITICAL, 4 )
+      self.msgBar.pushMessage( NAME_PLUGIN, msg, QgsMessageBar.CRITICAL, 4 )
       #
       return False
     #
     if not self.featureImage.setImage( image, self.dicImages ):
-      self.msgBar.pushMessage( self.featureImage.msgError(), QgsMessageBar.CRITICAL, 4 )
+      self.msgBar.pushMessage( NAME_PLUGIN, self.featureImage.msgError(), QgsMessageBar.CRITICAL, 4 )
       #
       return False
     #
@@ -228,48 +233,28 @@ class CatalogOTF(QObject):
       it = self.layer.getFeatures( fr ) 
       f = QgsFeature()
       while it.nextFeature( f ):
-        geom = f.geometry() 
-        bb = geom.boundingBox()
-        if geom.intersects( rectCanvas ):
+        if f.geometry().intersects( rectCanvas ):
           images.append( basename( f[ self.nameFieldSource ] ) )
       #
       del fids[:]
       #
       return images
 
+    def messageTotalImages( total=None ):
+      msg = "" if total is None else u"Adding %d images in '%s'..." % ( total, self.ltgCatalogName ) 
+      self.iface.mainWindow().statusBar().showMessage( msg )
+#       self.msgBar.pushMessage( NAME_PLUGIN, msg, QgsMessageBar.INFO, 2 )
+
+    def overrideCursor():
+      cursor = QApplication.overrideCursor()
+      if cursor is None or cursor == 0:
+          QApplication.setOverrideCursor( QCursor( Qt.WaitCursor ) )
+      elif cursor.shape() != Qt.WaitCursor:
+          QApplication.setOverrideCursor( QCursor( Qt.WaitCursor ) )
+    
     def addImages(images):
 
-      def addImage(image):
-
-        def _addImage():
-
-          def setTransparence():
-
-            def getTTVP():
-              ts = QgsRasterTransparency.TransparentThreeValuePixel()
-              ts.red = ts.green = ts.blue = 0.0
-              ts.percentTransparent = 100.0
-              return ts
-
-            layerImage.renderer().rasterTransparency().setTransparentThreeValuePixelList( [ getTTVP() ] )
-
-          layerImage = QgsRasterLayer( fileInfo.filePath(), fileInfo.baseName() )
-          if not layerImage.isValid():
-            return False
-          else:
-            # If not XML, set transparence
-            fileName = fileInfo.fileName()
-            extension = ".xml"
-            idExt = fileName.rfind( extension )
-            if idExt == -1 or len( fileName ) != ( idExt + len ( extension ) ):
-              setTransparence()
-            #
-            layer = QgsMapLayerRegistry.instance().addMapLayer( layerImage, addToLegend=False )
-            ltl = self.ltgCatalog.addLayer( layer )
-            ltl.setVisible( Qt.Unchecked )
-            name = "%s (%s)" % ( date.toString( "yyyy-MM-dd" ), image )
-            ltl.setLayerName( name )
-            return True
+      def getFileInfoDate( image ):
 
         def prepareFileTMS( url_tms ):
 
@@ -293,27 +278,89 @@ class CatalogOTF(QObject):
 
         value = self.dicImages [image]
         source = value['source']
-        date = value['date']
         isUrl = source.find('http://') == 0 or source.find('https://') == 0
-        fileInfo = prepareFileTMS( source ) if isUrl else QFileInfo( source )
+        fi = prepareFileTMS( source ) if isUrl else QFileInfo( source )
         #
-        return _addImage()
+        return { 'fileinfo': fi, 'date': value['date'] }
+      #
+      
+      def setTransparence():
 
-      def getSortedImages(images, v_reverse=False):
-        images_date = map( lambda item: { '_image': item, 'date': self.dicImages [ item ]['date'] }, images )
-        return sorted( images_date, key = lambda item: item['date'], reverse = v_reverse ) 
+        def getListTTVP():
+          t = QgsRasterTransparency.TransparentThreeValuePixel()
+          t.red = t.green = t.blue = 0.0
+          t.percentTransparent = 100.0
+          return [ t ]
+        
+        extension = ".xml"
+        l_ttvp = getListTTVP()
+        #
+        for id in range( 0, len( l_raster ) ):
+          fileName = l_fileinfo_date[ id ]['fileinfo'].fileName()
+          idExt = fileName.rfind( extension )
+          if idExt == -1 or len( fileName ) != ( idExt + len ( extension ) ):
+            l_raster[ id ].renderer().rasterTransparency().setTransparentThreeValuePixelList( l_ttvp )
 
-      l_error = []
-      for item in getSortedImages( images, True ):
-        if not addImage( item['_image'] ):
-          l_error.append( item['_image'] )
-      if len( l_error ) > 0:
+      # Sorted images 
+      l_image_date = map( lambda item: { '_image': item, 'date': self.dicImages [ item ]['date'] }, images )
+      l_image_date_sorted = sorted( l_image_date, key = lambda item: item['date'], reverse = True )
+      # 
+      l_image =  map( lambda item: item['_image'], l_image_date_sorted )
+      del l_image_date[:]
+      del l_image_date_sorted[:]
+      #
+      l_fileinfo_date = map( getFileInfoDate, l_image )
+      l_raster = map( lambda item: 
+                        QgsRasterLayer( item['fileinfo'].filePath(), item['fileinfo'].baseName() ),
+                        l_fileinfo_date )
+      #
+      # Invalid raster
+      #
+      l_id_error = []
+      for id in range( 0, len( l_raster ) ):
+        if not l_raster[ id ].isValid():
+          l_id_error.append( id )
+      #
+      l_error = None
+      if len( l_id_error ) > 0:
+        l_error = map( lambda item: l_image[ item ], l_id_error )
+        #
+        l_removes = [ l_raster, l_fileinfo_date, l_image ]
+        for id in l_id_error:
+          for item in l_removes:
+            item.remove( item[ id ] )
+        del l_id_error[:]
+        del l_removes[:]
+      #
+      # Add raster
+      #
+      totalLayer = 0
+      if len( l_raster ) > 0:
+        setTransparence()
+        l_layer = QgsMapLayerRegistry.instance().addMapLayers( l_raster, addToLegend=False )
+        for id in range( 0, len( l_layer ) ):
+          ltl = self.ltgCatalog.addLayer( l_layer[ id ] )
+          ltl.setVisible( Qt.Unchecked )
+          name = "%s (%s)" % ( l_fileinfo_date[ id ]['date'].toString( "yyyy-MM-dd" ), l_image[ id ] )
+          ltl.setLayerName( name )
+        #
+        totalLayer = len( l_layer ) 
+        #
+        del l_image[:]
+        del l_fileinfo_date[:]
+        del l_raster[:]
+        del l_layer[:]
+      #
+      # Message Error
+      #
+      if not l_error is None:
         msg = "\n" .join( l_error )
-        self.msgBar.pushMessage( "Images invalid:\n%s" % msg, QgsMessageBar.CRITICAL, 5 )
+        self.msgBar.pushMessage( NAME_PLUGIN, "Images invalid:\n%s" % msg, QgsMessageBar.CRITICAL, 5 )
         del l_error[:]
-      else:
-        value = str( len( images ) )
-        self.changedTotal.emit( self.layer.id(), value )
+      #
+      # Update table
+      #
+      self.changedTotal.emit( self.layer.id(), str( totalLayer)  )
 
     def setCurrentImage():
       sourceImage = self.dicImages[ self.featureImage.image() ]['source']
@@ -328,17 +375,21 @@ class CatalogOTF(QObject):
     ss = { 'signal': self.ltv.activated , 'slot': self.activated   }
     ss['signal'].disconnect( ss['slot'] )
     #
-    self.changedTotal.emit( self.layer.id(), "Calculating..." )
-    #
     cslc = getCurrentStatusLayerCatalog()
     #
     self.ltgCatalog.removeAllChildren()
     #
-    addImages( getImagesByCanvas() )
+    images = getImagesByCanvas()
+    messageTotalImages( len( images ) ) # Need be before overrideCursor()  
+    overrideCursor()
+    addImages( images )
+    del images[:]
+    messageTotalImages()
+    QApplication.restoreOverrideCursor()
     #
     if not self.featureImage.image() is None:
       setCurrentImage() 
-    #    
+    #
     ss['signal'].connect( ss['slot'] )
 
   def _setGroupCatalog(self):
@@ -351,7 +402,7 @@ class CatalogOTF(QObject):
   @pyqtSlot()
   def extentsChanged(self):
     if self.layer is None:
-      self.msgBar.pushMessage( "Need define layer catalog", QgsMessageBar.WARNING, 2 )
+      self.msgBar.pushMessage( NAME_PLUGIN, "Need define layer catalog", QgsMessageBar.WARNING, 2 )
       return
     #
     renderFlag = self.canvas.renderFlag()
@@ -371,7 +422,7 @@ class CatalogOTF(QObject):
   @pyqtSlot( 'QModelIndex' )
   def activated(self, index ):
     if self.layer is None:
-      self.msgBar.pushMessage( "Need define layer catalog", QgsMessageBar.WARNING, 2 )
+      self.msgBar.pushMessage( NAME_PLUGIN, "Need define layer catalog", QgsMessageBar.WARNING, 2 )
       return
     #
     layer = self.ltv.currentLayer()
@@ -780,4 +831,4 @@ class DockWidgetCatalogOTF(QDockWidget):
           item.geometryType() == QGis.Polygon
       totalLayers = len( filter( f, self.iface.legendInterface().layers() ) )
       msg = "Did not find a new catalog. Catalog layers %d of %d(polygon layers)" % ( len( self.cotf ), totalLayers ) 
-      msgBar.pushMessage( msg, QgsMessageBar.INFO, 3 )
+      msgBar.pushMessage( NAME_PLUGIN, msg, QgsMessageBar.INFO, 3 )
