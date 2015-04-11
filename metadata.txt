@@ -1,34 +1,26 @@
-; the next section is mandatory
 [general]
 name=Catalog on the fly
-description=Automatically adds  images that are in the catalog layer that intersect with the map area.
-  Work with catalog layer.
+description=Automatically adds images that are in the catalog layer that intersect with the map area.
+about=This plugin work with catalog layer.
+  Catalog layer need be the polygon layer and have two fields, source image(string) and date of image(date).
+  This plugin is developed on the demand of IBAMA(Brazilian Institute of Environment and Renewable Natural Resources)
+  http://www.ibama.gov.br
   See video for use this plugin: https://youtu.be/2S3RlWr0uQg
-version=0.1
+version=0.5
 qgisMinimumVersion=2.8
-
-; not used yet, will allow to put a plugin in the right menu
 category=Raster
-
 author=Luiz Motta
 email=motta.luiz@gmail.com
 
-; end of mandatory metadata
+changelog=0.5
+  - Add thread for calculate images in grou of catalog
+  0.1
+  - Start of plugin
 
-; start of optional metadata
-
-changelog=0.1
-    - Start of plugin
-
-; tags are in comma separated value format, spaces are allowed
-tags=catalog,raster, satellite
-
+tags=catalog,raster, satellite, IBAMA
 homepage=https://github.com/lmotta/catalog-on-the-fly
 tracker=http://hub.qgis.org/projects/catalogotf
 repository=https://github.com/lmotta/catalog-on-the-fly
-
-; path to a icon within the plugin folder
 icon=catalogotf.svg
-
 experimental=True
 deprecated=False
