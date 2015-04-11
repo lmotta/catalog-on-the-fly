@@ -23,7 +23,11 @@ import urllib2
 from datetime import datetime
 from os.path import basename
 
-from PyQt4.QtCore import ( Qt, QObject, QTimer, QFileInfo, QVariant, QPyNullVariant, pyqtSignal, pyqtSlot )
+from PyQt4.QtCore import ( 
+     Qt, QObject, QTimer, QThread, QFileInfo, QVariant,
+     QPyNullVariant, pyqtSignal, pyqtSlot
+)
+
 from PyQt4.QtGui  import (
      QApplication,  QCursor,
      QTableWidget, QTableWidgetItem,
@@ -116,6 +120,207 @@ class FeatureImage:
     return self.msgError
 
 
+class WorkerPopulateGroup(QObject):
+
+  # Signals 
+  finished = pyqtSignal( bool )
+  messageTotalImages = pyqtSignal( str )
+  messageError = pyqtSignal( str )
+
+  def __init__(self, canvas):
+    
+    super(WorkerPopulateGroup, self).__init__()
+    #
+    self.canvas = canvas
+    self.tempDir = "/tmp"
+    self.killed = False
+    self.dicImages = self.nameFieldSource = self.layer = self.ltgCatalog = self.selectedImage = None
+
+  def setData(self, data):
+    self.dicImages = data['dicImages']
+    self.nameFieldSource = data['nameFieldSource']
+    self.layer = data['layer']
+    self.ltgCatalog = data['ltgCatalog']
+    self.selectedImage = data['selectedImage']
+
+  def run(self):
+
+    def getImagesByCanvas():
+      images = []
+      #
+      rectLayer = self.layer.extent() if not self.selectedImage else self.layer.boundingBoxOfSelected()
+      crsLayer = self.layer.crs()
+      #
+      crsCanvas = self.canvas.mapSettings().destinationCrs()
+      ct = QgsCoordinateTransform( crsCanvas, crsLayer )
+      rectCanvas = self.canvas.extent() if crsCanvas == crsLayer else ct.transform( self.canvas.extent() )
+      #
+      if not rectLayer.intersects( rectCanvas ):
+        return [] 
+      #
+      fr = QgsFeatureRequest()
+      if self.selectedImage:
+        fr.setFilterFids( self.layer.selectedFeaturesIds() )
+      #fr.setSubsetOfAttributes( [ self.nameFieldSource ], self.layer.dataProvider().fields() )
+      index = QgsSpatialIndex( self.layer.getFeatures( fr ) )
+      fids = index.intersects( rectCanvas )
+      #
+      del fr
+      del index
+      #
+      fr = QgsFeatureRequest()
+      fr.setFilterFids ( fids )
+      it = self.layer.getFeatures( fr ) 
+      f = QgsFeature()
+      while it.nextFeature( f ):
+        if f.geometry().intersects( rectCanvas ):
+          images.append( basename( f[ self.nameFieldSource ] ) )
+      #
+      del fids[:]
+      #
+      return images
+
+    def addImages(images):
+
+      def getFileInfoDate( image ):
+
+        def prepareFileTMS( url_tms ):
+
+          def createLocalFile():
+            response = urllib2.urlopen( url_tms )
+            html = response.read()
+            response.close()
+            #
+            fw = open( localName, 'w' )
+            fw.write( html )
+            fw.close()
+
+          localName = "%s/%s" % ( self.tempDir, basename( url_tms ) )
+          fileInfo = QFileInfo( localName )
+          #
+          if not fileInfo.exists():
+            createLocalFile()
+            fileInfo = QFileInfo( localName )
+          #
+          return fileInfo
+
+        value = self.dicImages[ image ]
+        source = value['source']
+        isUrl = source.find('http://') == 0 or source.find('https://') == 0
+        fi = prepareFileTMS( source ) if isUrl else QFileInfo( source )
+        #
+        return { 'fileinfo': fi, 'date': value['date'] }
+      #
+      
+      def setTransparence():
+
+        def getListTTVP():
+          t = QgsRasterTransparency.TransparentThreeValuePixel()
+          t.red = t.green = t.blue = 0.0
+          t.percentTransparent = 100.0
+          return [ t ]
+        
+        extension = ".xml"
+        l_ttvp = getListTTVP()
+        #
+        for id in range( 0, len( l_raster ) ):
+          fileName = l_fileinfo_date[ id ]['fileinfo'].fileName()
+          idExt = fileName.rfind( extension )
+          if idExt == -1 or len( fileName ) != ( idExt + len ( extension ) ):
+            l_raster[ id ].renderer().rasterTransparency().setTransparentThreeValuePixelList( l_ttvp )
+
+      def cleanLists( lsts ):
+        for item in lsts:
+          del item[:]
+      
+      # Sorted images 
+      l_image_date = map( lambda item: { '_image': item, 'date': self.dicImages [ item ]['date'] }, images )
+      l_image_date_sorted = sorted( l_image_date, key = lambda item: item['date'], reverse = True )
+      #
+      l_image =  map( lambda item: item['_image'], l_image_date_sorted )
+      #
+      del l_image_date[:]
+      del l_image_date_sorted[:]
+      #
+      totalRaster = -1 # isKilled
+      #
+      l_fileinfo_date = map( getFileInfoDate, l_image )
+      #
+      if self.isKilled:
+        cleanLists( [ l_image, l_fileinfo_date ] )
+        return totalRaster
+      #
+      l_raster = map( lambda item: 
+                        QgsRasterLayer( item['fileinfo'].filePath(), item['fileinfo'].baseName() ),
+                        l_fileinfo_date )
+      #
+      if self.isKilled:
+        cleanLists( [ l_image, l_fileinfo_date, l_raster ] )
+        return totalRaster
+      #
+      # Invalid raster
+      l_id_error = []
+      for id in range( 0, len( l_raster ) ):
+        if not l_raster[ id ].isValid():
+          l_id_error.append( id )
+      #
+      l_error = None
+      if len( l_id_error ) > 0:
+        l_error = map( lambda item: l_image[ item ], l_id_error )
+        #
+        l_removes = [ l_raster, l_fileinfo_date, l_image ]
+        for id in l_id_error:
+          for item in l_removes:
+            item.remove( item[ id ] )
+        del l_id_error[:]
+        del l_removes[:]
+      #
+      if self.isKilled:
+        cleanLists( [ l_image, l_fileinfo_date, l_raster, l_error ] )
+        return totalRaster
+      #
+      totalRaster = len( l_raster ) 
+      # Add raster
+      if totalRaster > 0:
+        setTransparence()
+        l_layer = []
+        for item in l_raster:
+          l_layer.append( QgsMapLayerRegistry.instance().addMapLayer( item, addToLegend=False ) )
+          #
+          if self.isKilled:
+            cleanLists( [ l_image, l_fileinfo_date, l_raster, l_error, l_layer ] )
+            return -1
+          #
+        for id in range( 0, len( l_layer ) ):
+          ltl = self.ltgCatalog.addLayer( l_layer[ id ] )
+          ltl.setVisible( Qt.Unchecked )
+          name = "%s (%s)" % ( l_fileinfo_date[ id ]['date'].toString( "yyyy-MM-dd" ), l_image[ id ] )
+          ltl.setLayerName( name )
+        #
+        cleanLists( [ l_image, l_fileinfo_date, l_raster, l_layer ] )
+      #
+      # Message Error
+      if not l_error is None:
+        self.messageError.emit( "Images invalid:\n%s" % "\n" .join( l_error ) )
+        del l_error[:]
+      #
+      return totalRaster
+
+    self.isKilled = False
+    images = getImagesByCanvas()
+    self.messageTotalImages.emit( "Processing %d" %  len( images ) )
+    totalRaster = addImages( images )
+    msg = "" if totalRaster == -1 else str( totalRaster ) 
+    self.messageTotalImages.emit( msg )
+    #
+    del images[:]
+    self.finished.emit( self.isKilled )
+
+  @pyqtSlot()
+  def kill(self):
+    self.isKilled = True
+
+
 class CatalogOTF(QObject):
   
   # Signals 
@@ -143,16 +348,21 @@ class CatalogOTF(QObject):
     self.model = self.ltv.layerTreeModel()
     self.ltgRoot = QgsProject.instance().layerTreeRoot()
     self.msgBar = iface.messageBar()
-    self.tempDir = "/tmp"
+    #
+    self.threadPG = self.workerPG = None
     #
     connecTableCOTF()
     QgsMapLayerRegistry.instance().layersWillBeRemoved.connect( self.layersWillBeRemoved ) # Catalog layer removed
     #
     self.layer = self.layerName = self.nameFieldSource = self.nameFieldDate = None
     self.ltgCatalog = self.ltgCatalogName = self.dicImages = None
-    self.featureImage = None
+    self.featureImage = self.currentStatusLC = None
     self.zoomImage = self.highlightImage = self.selectedImage = False
 
+  def __del__(self):
+    self.workerPG.deleteLater()
+    self.threadPG.deleteLater()
+    
   def _connect(self, isConnect = True):
     ss = [
       { 'signal': self.canvas.extentsChanged , 'slot': self.extentsChanged },
@@ -194,6 +404,13 @@ class CatalogOTF(QObject):
 
   def _populateGroupCatalog(self):
 
+    def overrideCursor():
+      cursor = QApplication.overrideCursor()
+      if cursor is None or cursor == 0:
+          QApplication.setOverrideCursor( QCursor( Qt.WaitCursor ) )
+      elif cursor.shape() != Qt.WaitCursor:
+          QApplication.setOverrideCursor( QCursor( Qt.WaitCursor ) )
+
     def getCurrentStatusLayerCatalog():
       node = self.ltv.currentNode()
       if node is None or not node.nodeType() == QgsLayerTreeNode.NodeLayer:
@@ -205,192 +422,37 @@ class CatalogOTF(QObject):
       #
       return { 'source': node.layer().source(), 'visible': node.isVisible() }
 
-    def getImagesByCanvas():
-      images = []
-      #
-      rectLayer = self.layer.extent() if not self.selectedImage else self.layer.boundingBoxOfSelected()
-      crsLayer = self.layer.crs()
-      #
-      crsCanvas = self.canvas.mapSettings().destinationCrs()
-      ct = QgsCoordinateTransform( crsCanvas, crsLayer )
-      rectCanvas = self.canvas.extent() if crsCanvas == crsLayer else ct.transform( self.canvas.extent() )
-      #
-      if not rectLayer.intersects( rectCanvas ):
-        return [] 
-      #
-      fr = QgsFeatureRequest()
-      if self.selectedImage:
-        fr.setFilterFids( self.layer.selectedFeaturesIds() )
-      #fr.setSubsetOfAttributes( [ self.nameFieldSource ], self.layer.dataProvider().fields() )
-      index = QgsSpatialIndex( self.layer.getFeatures( fr ) )
-      fids = index.intersects( rectCanvas )
-      #
-      del fr
-      del index
-      #
-      fr = QgsFeatureRequest()
-      fr.setFilterFids ( fids )
-      it = self.layer.getFeatures( fr ) 
-      f = QgsFeature()
-      while it.nextFeature( f ):
-        if f.geometry().intersects( rectCanvas ):
-          images.append( basename( f[ self.nameFieldSource ] ) )
-      #
-      del fids[:]
-      #
-      return images
-
-    def messageTotalImages( total=None ):
-      msg = "" if total is None else u"Adding %d images in '%s'..." % ( total, self.ltgCatalogName ) 
-      self.iface.mainWindow().statusBar().showMessage( msg )
-#       self.msgBar.pushMessage( NAME_PLUGIN, msg, QgsMessageBar.INFO, 2 )
-
-    def overrideCursor():
-      cursor = QApplication.overrideCursor()
-      if cursor is None or cursor == 0:
-          QApplication.setOverrideCursor( QCursor( Qt.WaitCursor ) )
-      elif cursor.shape() != Qt.WaitCursor:
-          QApplication.setOverrideCursor( QCursor( Qt.WaitCursor ) )
+    def runWorker():
+      def connectWorkerPG():
+        self.workerPG.finished.connect( self.finishedPG )
+        self.workerPG.messageTotalImages.connect( self.messageTotalImagesPG )
+        self.workerPG.messageError.connect( self.messageErrorPG )
     
-    def addImages(images):
-
-      def getFileInfoDate( image ):
-
-        def prepareFileTMS( url_tms ):
-
-          def createLocalFile():
-            response = urllib2.urlopen( url_tms )
-            html = response.read()
-            response.close()
-            #
-            fw = open( localName, 'w' )
-            fw.write( html )
-            fw.close()
-
-          localName = "%s/%s" % ( self.tempDir, basename( url_tms ) )
-          fileInfo = QFileInfo( localName )
-          #
-          if not fileInfo.exists():
-            createLocalFile()
-            fileInfo = QFileInfo( localName )
-          #
-          return fileInfo
-
-        value = self.dicImages [image]
-        source = value['source']
-        isUrl = source.find('http://') == 0 or source.find('https://') == 0
-        fi = prepareFileTMS( source ) if isUrl else QFileInfo( source )
-        #
-        return { 'fileinfo': fi, 'date': value['date'] }
+      self.threadPG = QThread( self )
+      self.workerPG = WorkerPopulateGroup( self.canvas )
+      self.workerPG.moveToThread( self.threadPG )
+      data = {}
+      data['dicImages'] = self.dicImages
+      data['nameFieldSource'] = self.nameFieldSource
+      data['layer'] = self.layer
+      data['ltgCatalog'] = self.ltgCatalog
+      data['selectedImage'] = self.selectedImage
+      self.workerPG.setData( data )
+      connectWorkerPG()
       #
-      
-      def setTransparence():
-
-        def getListTTVP():
-          t = QgsRasterTransparency.TransparentThreeValuePixel()
-          t.red = t.green = t.blue = 0.0
-          t.percentTransparent = 100.0
-          return [ t ]
-        
-        extension = ".xml"
-        l_ttvp = getListTTVP()
-        #
-        for id in range( 0, len( l_raster ) ):
-          fileName = l_fileinfo_date[ id ]['fileinfo'].fileName()
-          idExt = fileName.rfind( extension )
-          if idExt == -1 or len( fileName ) != ( idExt + len ( extension ) ):
-            l_raster[ id ].renderer().rasterTransparency().setTransparentThreeValuePixelList( l_ttvp )
-
-      # Sorted images 
-      l_image_date = map( lambda item: { '_image': item, 'date': self.dicImages [ item ]['date'] }, images )
-      l_image_date_sorted = sorted( l_image_date, key = lambda item: item['date'], reverse = True )
-      # 
-      l_image =  map( lambda item: item['_image'], l_image_date_sorted )
-      del l_image_date[:]
-      del l_image_date_sorted[:]
-      #
-      l_fileinfo_date = map( getFileInfoDate, l_image )
-      l_raster = map( lambda item: 
-                        QgsRasterLayer( item['fileinfo'].filePath(), item['fileinfo'].baseName() ),
-                        l_fileinfo_date )
-      #
-      # Invalid raster
-      #
-      l_id_error = []
-      for id in range( 0, len( l_raster ) ):
-        if not l_raster[ id ].isValid():
-          l_id_error.append( id )
-      #
-      l_error = None
-      if len( l_id_error ) > 0:
-        l_error = map( lambda item: l_image[ item ], l_id_error )
-        #
-        l_removes = [ l_raster, l_fileinfo_date, l_image ]
-        for id in l_id_error:
-          for item in l_removes:
-            item.remove( item[ id ] )
-        del l_id_error[:]
-        del l_removes[:]
-      #
-      # Add raster
-      #
-      totalLayer = 0
-      if len( l_raster ) > 0:
-        setTransparence()
-        l_layer = QgsMapLayerRegistry.instance().addMapLayers( l_raster, addToLegend=False )
-        for id in range( 0, len( l_layer ) ):
-          ltl = self.ltgCatalog.addLayer( l_layer[ id ] )
-          ltl.setVisible( Qt.Unchecked )
-          name = "%s (%s)" % ( l_fileinfo_date[ id ]['date'].toString( "yyyy-MM-dd" ), l_image[ id ] )
-          ltl.setLayerName( name )
-        #
-        totalLayer = len( l_layer ) 
-        #
-        del l_image[:]
-        del l_fileinfo_date[:]
-        del l_raster[:]
-        del l_layer[:]
-      #
-      # Message Error
-      #
-      if not l_error is None:
-        msg = "\n" .join( l_error )
-        self.msgBar.pushMessage( NAME_PLUGIN, "Images invalid:\n%s" % msg, QgsMessageBar.CRITICAL, 5 )
-        del l_error[:]
-      #
-      # Update table
-      #
-      self.changedTotal.emit( self.layer.id(), str( totalLayer)  )
-
-    def setCurrentImage():
-      sourceImage = self.dicImages[ self.featureImage.image() ]['source']
-      ltlsImage = filter( lambda item: item.layer().source() == sourceImage, self.ltgCatalog.findLayers()  )
-      if len( ltlsImage ) > 0:
-        ltl = ltlsImage[0]
-        layer = ltl.layer()
-        self.ltv.setCurrentLayer( layer )
-        if not cslc is None and cslc['source'] == layer.source():
-          ltl.setVisible( cslc['visible'] ) 
-
-    ss = { 'signal': self.ltv.activated , 'slot': self.activated   }
-    ss['signal'].disconnect( ss['slot'] )
+      self.threadPG.started.connect( self.workerPG.run )
+      self.threadPG.start()
+    
+    if not self.threadPG is None:
+      self.workerPG.kill()
+      return
     #
-    cslc = getCurrentStatusLayerCatalog()
-    #
+    self.ltv.activated.disconnect( self.activated )
+    overrideCursor()
+    self.currentStatusLC = getCurrentStatusLayerCatalog()
     self.ltgCatalog.removeAllChildren()
     #
-    images = getImagesByCanvas()
-    messageTotalImages( len( images ) ) # Need be before overrideCursor()  
-    overrideCursor()
-    addImages( images )
-    del images[:]
-    messageTotalImages()
-    QApplication.restoreOverrideCursor()
-    #
-    if not self.featureImage.image() is None:
-      setCurrentImage() 
-    #
-    ss['signal'].connect( ss['slot'] )
+    runWorker() # See finishPG
 
   def _setGroupCatalog(self):
     self.ltgCatalogName = "%s - Catalog" % self.layer.name()
@@ -398,6 +460,42 @@ class CatalogOTF(QObject):
     self.ltgCatalog = self.ltgRoot.findGroup( self.ltgCatalogName  )
     if self.ltgCatalog is None:
       self.ltgCatalog = self.ltgRoot.addGroup( self.ltgCatalogName )
+
+  @pyqtSlot( bool )
+  def finishedPG(self, isKilled ):
+    
+    def setCurrentImage():
+      sourceImage = self.dicImages[ self.featureImage.image() ]['source']
+      ltlsImage = filter( lambda item: item.layer().source() == sourceImage, self.ltgCatalog.findLayers()  )
+      if len( ltlsImage ) > 0:
+        ltl = ltlsImage[0]
+        layer = ltl.layer()
+        self.ltv.setCurrentLayer( layer )
+        if not self.currentStatusLC is None and self.currentStatusLC['source'] == layer.source():
+          ltl.setVisible( self.currentStatusLC['visible'] ) 
+    
+    self.ltv.activated.connect( self.activated )
+    QApplication.restoreOverrideCursor()
+    #
+    if not isKilled and not self.featureImage.image() is None:
+      setCurrentImage()
+    # clean up the worker and thread
+    self.workerPG.deleteLater()
+    self.threadPG.quit()
+    self.threadPG.wait()
+    self.threadPG.deleteLater()
+    self.threadPG = self.workerPG = None
+    #
+    if isKilled:
+      self._populateGroupCatalog()
+
+  @pyqtSlot( str )
+  def messageTotalImagesPG(self, msg):
+    self.changedTotal.emit( self.layer.id(), msg  )
+
+  @pyqtSlot( str )
+  def messageErrorPG(self, msg):
+    self.msgBar.pushMessage( NAME_PLUGIN, msg, QgsMessageBar.CRITICAL, 4 )
 
   @pyqtSlot()
   def extentsChanged(self):
@@ -733,6 +831,7 @@ class TableCatalogOTF(QObject):
   @pyqtSlot( str, str )
   def changedNameLayer(self, layerID, name):
     self._changedText( layerID, name, 0 )
+    self.tableWidget.resizeColumnsToContents()
     
   @pyqtSlot( str, str )
   def changedNameGroup(self, layerID, name=None):
@@ -751,10 +850,12 @@ class TableCatalogOTF(QObject):
       uncheckedLayer()
       self._changedText( layerID, name, 2 )
     self._changedText( layerID, name, 1 )
+    self.tableWidget.resizeColumnsToContents()
 
   @pyqtSlot( str, str )
   def changedTotal(self, layerID, value):
     self._changedText( layerID, value, 2 )
+    self.tableWidget.resizeColumnsToContents()
 
   def widget(self):
     return self.tableWidget
