@@ -24,7 +24,7 @@ from datetime import datetime
 from os.path import basename
 
 from PyQt4.QtCore import ( 
-     Qt, QObject, QTimer, QThread, QFileInfo, QVariant,
+     Qt, QObject, QTimer, QThread, QFileInfo, QVariant, QCoreApplication,
      QPyNullVariant, pyqtSignal, pyqtSlot
 )
 
@@ -75,7 +75,8 @@ class FeatureImage:
     fid = dicImages[ image ]['id']
     geom = self._getGeometry( fid )
     if geom is None:
-      self.msgError = "Geometry of feature (fid = %d) of layer ('%s') is invalid" % ( fid, self.layer.name() )
+      msgtrans = QCoreApplication.translate("CatalogOTF", "Geometry of feature (fid = %d) of layer ('%s') is invalid")
+      self.msgError = msgtrans % ( fid, self.layer.name() )
       return False
     #
     self.geom = geom
@@ -301,14 +302,16 @@ class WorkerPopulateGroup(QObject):
       #
       # Message Error
       if not l_error is None:
-        self.messageError.emit( "Images invalid:\n%s" % "\n" .join( l_error ) )
+        msgtrans = QCoreApplication.translate("CatalogOTF", "Images invalid:\n%s")
+        self.messageError.emit( msgtrans % "\n" .join( l_error ) )
         del l_error[:]
       #
       return totalRaster
 
     self.isKilled = False
     images = getImagesByCanvas()
-    self.messageTotalImages.emit( "Processing %d" %  len( images ) )
+    msgtrans = QCoreApplication.translate("CatalogOTF", "Processing %d")
+    self.messageTotalImages.emit( msgtrans %  len( images ) )
     totalRaster = addImages( images )
     msg = "" if totalRaster == -1 else str( totalRaster ) 
     self.messageTotalImages.emit( msg )
@@ -390,7 +393,8 @@ class CatalogOTF(QObject):
     #
     image = basename( layer.source() )
     if not image in self.dicImages .keys():
-      msg = "Image (%s) not in catalog layer ('%s')" % ( image, self.layer.name() )
+      msgtrans = QCoreApplication.translate("CatalogOTF", "Image (%s) not in catalog layer ('%s')")
+      msg = msgtrans % ( image, self.layer.name() )
       self.msgBar.pushMessage( NAME_PLUGIN, msg, QgsMessageBar.CRITICAL, 4 )
       #
       return False
@@ -500,7 +504,8 @@ class CatalogOTF(QObject):
   @pyqtSlot()
   def extentsChanged(self):
     if self.layer is None:
-      self.msgBar.pushMessage( NAME_PLUGIN, "Need define layer catalog", QgsMessageBar.WARNING, 2 )
+      msgtrans = QCoreApplication.translate("CatalogOTF", "Need define layer catalog")
+      self.msgBar.pushMessage( NAME_PLUGIN, msgtrans, QgsMessageBar.WARNING, 2 )
       return
     #
     renderFlag = self.canvas.renderFlag()
@@ -520,7 +525,8 @@ class CatalogOTF(QObject):
   @pyqtSlot( 'QModelIndex' )
   def activated(self, index ):
     if self.layer is None:
-      self.msgBar.pushMessage( NAME_PLUGIN, "Need define layer catalog", QgsMessageBar.WARNING, 2 )
+      msgtrans = QCoreApplication.translate("CatalogOTF", "Need define layer catalog")
+      self.msgBar.pushMessage( NAME_PLUGIN, msgtrans, QgsMessageBar.WARNING, 2 )
       return
     #
     layer = self.ltv.currentLayer()
@@ -731,7 +737,8 @@ class TableCatalogOTF(QObject):
   def _init(self):
     self.tableWidget.setWindowTitle("Catalog OTF")
     self.tableWidget.setSortingEnabled( False )
-    headers = [ "Layer", "Group", "Total", "Select", "Highlight", "Zoom" ]
+    msgtrans = QCoreApplication.translate("CatalogOTF", "Layer,Group,Total,Select,Highlight,Zoom")
+    headers = msgtrans.split(',')
     self.tableWidget.setColumnCount( len( headers ) )
     self.tableWidget.setHorizontalHeaderLabels( headers )
     self.tableWidget.resizeColumnsToContents()
@@ -877,7 +884,8 @@ class DockWidgetCatalogOTF(QDockWidget):
       ( iniY, iniX, spanY, spanX ) = ( 0, 0, 1, 2 )
       gridLayout.addWidget( tbl, iniY, iniX, spanY, spanX )
       #
-      btnFindCatalogs = QPushButton( u"Find catalog", wgt )
+      msgtrans = QCoreApplication.translate("CatalogOTF", "Find catalog")
+      btnFindCatalogs = QPushButton( msgtrans, wgt )
       btnFindCatalogs.clicked.connect( self.findCatalogs )
       ( iniY, iniX, spanY, spanX ) = ( 1, 0, 1, 1 )
       gridLayout.addWidget( btnFindCatalogs, iniY, iniX, spanY, spanX )
@@ -931,5 +939,6 @@ class DockWidgetCatalogOTF(QDockWidget):
           item.type() == QgsMapLayer.VectorLayer and \
           item.geometryType() == QGis.Polygon
       totalLayers = len( filter( f, self.iface.legendInterface().layers() ) )
-      msg = "Did not find a new catalog. Catalog layers %d of %d(polygon layers)" % ( len( self.cotf ), totalLayers ) 
+      msgtrans = QCoreApplication.translate("CatalogOTF", "Did not find a new catalog. Catalog layers %d of %d(polygon layers)")
+      msg = msgtrans % ( len( self.cotf ), totalLayers ) 
       msgBar.pushMessage( NAME_PLUGIN, msg, QgsMessageBar.INFO, 3 )

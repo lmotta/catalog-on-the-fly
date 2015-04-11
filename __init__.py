@@ -19,8 +19,10 @@ email                : motta.luiz@gmail.com
  ***************************************************************************/
 """
 
+import os.path
+
 from PyQt4.QtGui import ( QAction, QIcon )
-from PyQt4.QtCore import ( Qt, pyqtSlot )
+from PyQt4.QtCore import ( Qt, QSettings, QTranslator, QCoreApplication, qVersion, pyqtSlot )
 
 from catalogotf import DockWidgetCatalogOTF
 
@@ -30,16 +32,39 @@ def classFactory(iface):
 class CatalogOTFPlugin:
 
   def __init__(self, iface):
+
+    def translate():
+      #
+      # For create file 'qm'
+      # 1) Define that files need for translation: catalogotf.pro
+      # 2) Create 'ts': pylupdate4 -verbose catalogotf.pro
+      # 3) Edit your translation: QtLinquist
+      # 4) Create 'qm': lrelease catalogotf_pt_BR.ts
+      #
+      dirname = os.path.dirname( os.path.abspath(__file__) )
+      locale = QSettings().value("locale/userLocale")
+      localePath = os.path.join( dirname, "i18n", "%s_%s.qm" % ( name_src, locale ) )
+      if os.path.exists(localePath):
+        self.translator = QTranslator()
+        self.translator.load(localePath)
+        if qVersion() > '4.3.3':
+          QCoreApplication.installTranslator(self.translator)      
+
     self.iface = iface
     self.name = u"&Catalog OTF"
     self.dock = None
+    name_src = "catalogotf"
+    translate()
+
 
   def initGui(self):
     import resources_rc # pyrcc4 -o resources_rc.py  resources_rc.qrc
-    self.action = QAction( QIcon(":/plugins/catalogotf_plugin/catalogotf.svg"), u"Catalog on the fly", self.iface.mainWindow() )
+    
+    msgtrans = QCoreApplication.translate("CatalogOTF", "Catalog on the fly")
+    self.action = QAction( QIcon(":/plugins/catalogotf_plugin/catalogotf.svg"), msgtrans, self.iface.mainWindow() )
     self.action.setObjectName("CatalogOTF")
-    self.action.setWhatsThis(u"Catalog on the fly")
-    self.action.setStatusTip(u"Catalog on the fly")
+    self.action.setWhatsThis( msgtrans )
+    self.action.setStatusTip( msgtrans )
     self.action.triggered.connect( self.run )
     #
     self.iface.addToolBarIcon( self.action )

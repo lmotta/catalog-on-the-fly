@@ -1,14 +1,9 @@
-# All Files ignore
-*
-# Minus these
-# 1) Python Files
-!__init__.py
-!catalogotf.py
-# 2) Resources
-!catalogotf.svg
-!resources_rc.qrc
-!metadata.txt
-!README.md
-!LICENSE
+# Ignore
+.directory
+*.pyc
+*.zip
+*.sh
+resources_rc.py
+# Ignore
 !create_zip_plugin.sh
-!.gitignore
+# Diretory ./i18n NEED .gitignore!
