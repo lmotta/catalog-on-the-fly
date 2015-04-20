@@ -24,7 +24,7 @@ from datetime import datetime
 from os.path import basename
 
 from PyQt4.QtCore import ( 
-     Qt, QObject, QTimer, QThread, QFileInfo, QVariant, QCoreApplication,
+     Qt, QObject, QTimer, QThread, QFileInfo, QDir, QVariant, QCoreApplication,
      QPyNullVariant, pyqtSignal, pyqtSlot
 )
 
@@ -123,6 +123,9 @@ class FeatureImage:
 
 class WorkerPopulateGroup(QObject):
 
+  # Static
+  TEMP_DIR = "/tmp"
+  
   # Signals 
   finished = pyqtSignal( bool )
   messageTotalImages = pyqtSignal( str )
@@ -133,7 +136,6 @@ class WorkerPopulateGroup(QObject):
     super(WorkerPopulateGroup, self).__init__()
     #
     self.canvas = canvas
-    self.tempDir = "/tmp"
     self.killed = False
     self.dicImages = self.nameFieldSource = self.layer = self.ltgCatalog = self.selectedImage = None
 
@@ -181,7 +183,7 @@ class WorkerPopulateGroup(QObject):
       #
       return images
 
-    def addImages(images):
+    def addImages():
 
       def getFileInfoDate( image ):
 
@@ -196,7 +198,7 @@ class WorkerPopulateGroup(QObject):
             fw.write( html )
             fw.close()
 
-          localName = "%s/%s" % ( self.tempDir, basename( url_tms ) )
+          localName = "%s/%s" % ( self.TEMP_DIR, basename( url_tms ) )
           fileInfo = QFileInfo( localName )
           #
           if not fileInfo.exists():
@@ -312,7 +314,7 @@ class WorkerPopulateGroup(QObject):
     images = getImagesByCanvas()
     msgtrans = QCoreApplication.translate("CatalogOTF", "Processing %d")
     self.messageTotalImages.emit( msgtrans %  len( images ) )
-    totalRaster = addImages( images )
+    totalRaster = addImages()
     msg = "" if totalRaster == -1 else str( totalRaster ) 
     self.messageTotalImages.emit( msg )
     #
@@ -919,6 +921,18 @@ class DockWidgetCatalogOTF(QDockWidget):
 
   @pyqtSlot()
   def findCatalogs(self):
+
+    def checkTempDir():
+      tempDir = QDir( WorkerPopulateGroup.TEMP_DIR )
+      if not tempDir.exists():
+        msgtrans1 = QCoreApplication.translate("CatalogOTF", "Created temporary directory '%s' for TMS")
+        msgtrans2 = QCoreApplication.translate("CatalogOTF", "Not possible create temporary directory '%s' for TMS")
+        isOk = tempDir.mkpath( WorkerPopulateGroup.TEMP_DIR )
+        msgtrans = msgtrans1 if isOk else msgtrans2
+        tempDir.setPath( WorkerPopulateGroup.TEMP_DIR )
+        msg = msgtrans % tempDir.absolutePath()
+        msgBar.pushMessage( NAME_PLUGIN, msg, QgsMessageBar.CRITICAL, 5 )
+    
     find = False
     f = lambda item: \
         item.type() == QgsMapLayer.VectorLayer and \
@@ -933,8 +947,8 @@ class DockWidgetCatalogOTF(QDockWidget):
         self.cotf[ layerID ].setLayerCatalog( item, nameFiedlsCatalog )
         find = True
     #
+    msgBar = self.iface.messageBar()
     if not find:
-      msgBar = self.iface.messageBar()
       f = lambda item: \
           item.type() == QgsMapLayer.VectorLayer and \
           item.geometryType() == QGis.Polygon
@@ -942,3 +956,5 @@ class DockWidgetCatalogOTF(QDockWidget):
       msgtrans = QCoreApplication.translate("CatalogOTF", "Did not find a new catalog. Catalog layers %d of %d(polygon layers)")
       msg = msgtrans % ( len( self.cotf ), totalLayers ) 
       msgBar.pushMessage( NAME_PLUGIN, msg, QgsMessageBar.INFO, 3 )
+    else:
+      checkTempDir()
