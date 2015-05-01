@@ -33,7 +33,7 @@ from PyQt4.QtGui  import (
      QTableWidget, QTableWidgetItem,
      QPushButton, QGridLayout, QProgressBar, QDockWidget, QWidget
 )
- 
+
 from qgis.gui import ( QgsHighlight, QgsMessageBar ) 
 from qgis.core import (
   QgsProject, QGis,
