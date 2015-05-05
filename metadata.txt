@@ -6,13 +6,16 @@ about=This plugin work with catalog layer.
   This plugin is developed on the demand of IBAMA(Brazilian Institute of Environment and Renewable Natural Resources)
   http://www.ibama.gov.br
   See video for use this plugin: https://youtu.be/2S3RlWr0uQg
-version=0.5
+version=0.6
 qgisMinimumVersion=2.8
 category=Raster
 author=Luiz Motta
 email=motta.luiz@gmail.com
 
-changelog=0.5
+changelog=0.6
+    Create 'tmp' directory (case for Windows user)
+    Refactoring the multiprocess (use of QThread) 
+  0.5
   - Add thread for calculate images in group of catalog
   0.1
   - Start of plugin

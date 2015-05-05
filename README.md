@@ -12,6 +12,9 @@ Automatically adds  images that are in the catalog layer that intersect with the
 Luiz Motta
 
 ## Changelog
+- 2015-05-04:
+Create 'tmp' directory (case for Windows user)
+Refactoring the multiprocess (use of QThread) 
 - 2015-04-11:
 Add thread for calculate images in group of catalog
 - 2015-03-29:
