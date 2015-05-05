@@ -128,15 +128,15 @@ class WorkerPopulateGroup(QObject):
   
   # Signals 
   finished = pyqtSignal( bool )
-  messageTotalImages = pyqtSignal( str )
+  messageStatus = pyqtSignal( str )
   messageError = pyqtSignal( str )
 
   def __init__(self, canvas):
     
     super(WorkerPopulateGroup, self).__init__()
+    self.killed = False
     #
     self.canvas = canvas
-    self.killed = False
     self.dicImages = self.nameFieldSource = self.layer = self.ltgCatalog = self.selectedImage = None
 
   def setData(self, data):
@@ -146,6 +146,7 @@ class WorkerPopulateGroup(QObject):
     self.ltgCatalog = data['ltgCatalog']
     self.selectedImage = data['selectedImage']
 
+  @pyqtSlot()
   def run(self):
 
     def getImagesByCanvas():
@@ -313,15 +314,14 @@ class WorkerPopulateGroup(QObject):
     self.isKilled = False
     images = getImagesByCanvas()
     msgtrans = QCoreApplication.translate("CatalogOTF", "Processing %d")
-    self.messageTotalImages.emit( msgtrans %  len( images ) )
+    self.messageStatus.emit( msgtrans %  len( images ) )
     totalRaster = addImages()
     msg = "" if totalRaster == -1 else str( totalRaster ) 
-    self.messageTotalImages.emit( msg )
+    self.messageStatus.emit( msg )
     #
     del images[:]
     self.finished.emit( self.isKilled )
 
-  @pyqtSlot()
   def kill(self):
     self.isKilled = True
 
@@ -354,7 +354,7 @@ class CatalogOTF(QObject):
     self.ltgRoot = QgsProject.instance().layerTreeRoot()
     self.msgBar = iface.messageBar()
     #
-    self.threadPG = self.workerPG = None
+    self._initThread()
     #
     connecTableCOTF()
     QgsMapLayerRegistry.instance().layersWillBeRemoved.connect( self.layersWillBeRemoved ) # Catalog layer removed
@@ -365,8 +365,7 @@ class CatalogOTF(QObject):
     self.zoomImage = self.highlightImage = self.selectedImage = False
 
   def __del__(self):
-    self.workerPG.deleteLater()
-    self.threadPG.deleteLater()
+    self._finishThread()
     
   def _connect(self, isConnect = True):
     ss = [
@@ -377,6 +376,34 @@ class CatalogOTF(QObject):
       { 'signal': self.ltv.activated, 'slot': self.activated },
       { 'signal': self.model.dataChanged, 'slot': self.dataChanged },
       { 'signal': self.ltgRoot.willRemoveChildren, 'slot': self.willRemoveChildren }
+    ]
+    if isConnect:
+      for item in ss:
+        item['signal'].connect( item['slot'] )  
+    else:
+      for item in ss:
+        item['signal'].disconnect( item['slot'] )
+
+  def _initThread(self):
+    self.thread = QThread( self )
+    self.thread.setObjectName( "QGIS_Plugin_%s" % NAME_PLUGIN )
+    self.worker = WorkerPopulateGroup( self.canvas )
+    self.worker.moveToThread( self.thread )
+    self._connectWorker()
+
+  def _finishThread(self):
+    self._connectWorker( False )
+    self.worker.deleteLater()
+    self.thread.wait()
+    self.thread.deleteLater()
+    self.thread = self.worker = None
+
+  def _connectWorker(self, isConnect = True):
+    ss = [
+      { 'signal': self.thread.started, 'slot': self.worker.run },
+      { 'signal': self.worker.finished, 'slot': self.finishedPG },
+      { 'signal': self.worker.messageStatus, 'slot': self.messageStatusPG },
+      { 'signal': self.worker.messageError, 'slot': self.messageErrorPG }
     ]
     if isConnect:
       for item in ss:
@@ -429,28 +456,17 @@ class CatalogOTF(QObject):
       return { 'source': node.layer().source(), 'visible': node.isVisible() }
 
     def runWorker():
-      def connectWorkerPG():
-        self.workerPG.finished.connect( self.finishedPG )
-        self.workerPG.messageTotalImages.connect( self.messageTotalImagesPG )
-        self.workerPG.messageError.connect( self.messageErrorPG )
-    
-      self.threadPG = QThread( self )
-      self.workerPG = WorkerPopulateGroup( self.canvas )
-      self.workerPG.moveToThread( self.threadPG )
       data = {}
       data['dicImages'] = self.dicImages
       data['nameFieldSource'] = self.nameFieldSource
       data['layer'] = self.layer
       data['ltgCatalog'] = self.ltgCatalog
       data['selectedImage'] = self.selectedImage
-      self.workerPG.setData( data )
-      connectWorkerPG()
-      #
-      self.threadPG.started.connect( self.workerPG.run )
-      self.threadPG.start()
-    
-    if not self.threadPG is None:
-      self.workerPG.kill()
+      self.worker.setData( data )
+      self.thread.start()
+    #
+    if self.thread.isRunning():
+      self.worker.kill()
       return
     #
     self.ltv.activated.disconnect( self.activated )
@@ -485,18 +501,14 @@ class CatalogOTF(QObject):
     #
     if not isKilled and not self.featureImage.image() is None:
       setCurrentImage()
-    # clean up the worker and thread
-    self.workerPG.deleteLater()
-    self.threadPG.quit()
-    self.threadPG.wait()
-    self.threadPG.deleteLater()
-    self.threadPG = self.workerPG = None
+    #
+    self.thread.quit()
     #
     if isKilled:
       self._populateGroupCatalog()
 
   @pyqtSlot( str )
-  def messageTotalImagesPG(self, msg):
+  def messageStatusPG(self, msg):
     self.changedTotal.emit( self.layer.id(), msg  )
 
   @pyqtSlot( str )

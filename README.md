@@ -12,6 +12,8 @@ Automatically adds  images that are in the catalog layer that intersect with the
 Luiz Motta
 
 ## Changelog
+- 2015-04-11:
+Add thread for calculate images in group of catalog
 - 2015-03-29:
 Create plugin, refactory and rename 'addimage_by_extension.py' for 'catalogotf.py'
 - 2015-03-18:

@@ -56,7 +56,6 @@ class CatalogOTFPlugin:
     name_src = "catalogotf"
     translate()
 
-
   def initGui(self):
     import resources_rc # pyrcc4 -o resources_rc.py  resources_rc.qrc
     
