@@ -12,6 +12,9 @@ Automatically adds  images that are in the catalog layer that intersect with the
 Luiz Motta
 
 ## Changelog
+- 2015-06-01
+Correction for identify catalog from Postgres.
+Removed FID = 0 in getNameFieldsCatalog().getFirstFeature(), first FID for Postfgres is 1 and not 0
 - 2015-05-04:
 Create 'tmp' directory (case for Windows user)
 Refactoring the multiprocess (use of QThread) 
