@@ -610,7 +610,7 @@ class CatalogOTF(QObject):
     def getFirstFeature():
       f = QgsFeature()
       #
-      fr = QgsFeatureRequest( 0 )
+      fr = QgsFeatureRequest() # First FID can be 0 or 1 depend of provider type
       it = layer.getFeatures( fr )
       isOk = it.nextFeature( f )
       it.close()
