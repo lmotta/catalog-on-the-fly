@@ -72,10 +72,9 @@ class CatalogOTFPlugin:
         item['signal'].disconnect( item['slot'] )
 
   def initGui(self):
-    import resources_rc # pyrcc4 -o resources_rc.py  resources_rc.qrc
-    
     msgtrans = QCoreApplication.translate("CatalogOTF", "Catalog on the fly")
-    self.action = QAction( QIcon(":/plugins/catalogotf_plugin/catalogotf.svg"), msgtrans, self.iface.mainWindow() )
+    icon = QIcon( os.path.join( os.path.dirname(__file__), 'catalogotf.svg' ) )
+    self.action = QAction( icon, msgtrans, self.iface.mainWindow() )
     self.action.setObjectName("CatalogOTF")
     self.action.setWhatsThis( msgtrans )
     self.action.setStatusTip( msgtrans )

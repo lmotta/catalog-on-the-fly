@@ -1,5 +1,0 @@
-<RCC>
-    <qresource prefix="/plugins/catalogotf_plugin">
-        <file>catalogotf.svg</file>
-    </qresource>
-</RCC>
