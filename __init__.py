@@ -24,7 +24,9 @@ import os.path
 from PyQt4.QtGui import ( QAction, QIcon )
 from PyQt4.QtCore import ( Qt, QSettings, QTranslator, QCoreApplication, qVersion, pyqtSlot )
 
-from catalogotf import DockWidgetCatalogOTF
+from qgis.core import ( QgsProject )
+
+from catalogotf import ( ProjectDockWidgetCatalogOTF, DockWidgetCatalogOTF )
 
 def classFactory(iface):
   return CatalogOTFPlugin( iface )
@@ -51,10 +53,23 @@ class CatalogOTFPlugin:
           QCoreApplication.installTranslator(self.translator)      
 
     self.iface = iface
+    self.projOTF = ProjectDockWidgetCatalogOTF( iface )
     self.name = u"&Catalog OTF"
     self.dock = None
     name_src = "catalogotf"
     translate()
+
+  def _connect(self, isConnect = True):
+    signal_slot = (
+      { 'signal': QgsProject.instance().readProject, 'slot': self.projOTF.onReadProject },
+      { 'signal': QgsProject.instance().writeProject, 'slot': self.projOTF.onWriteProject }
+    )
+    if isConnect:
+      for item in signal_slot:
+        item['signal'].connect( item['slot'] )
+    else:
+      for item in signal_slot:
+        item['signal'].disconnect( item['slot'] )
 
   def initGui(self):
     import resources_rc # pyrcc4 -o resources_rc.py  resources_rc.qrc
@@ -65,15 +80,18 @@ class CatalogOTFPlugin:
     self.action.setWhatsThis( msgtrans )
     self.action.setStatusTip( msgtrans )
     self.action.triggered.connect( self.run )
-    #
+
     self.iface.addToolBarIcon( self.action )
     self.iface.addPluginToRasterMenu( self.name, self.action )
+
+    self._connect()
 
   def unload(self):
     self.iface.removePluginMenu( self.name, self.action )
     self.iface.removeToolBarIcon( self.action )
     del self.action
     del self.dock
+    self._connect( False )
   
   @pyqtSlot()
   def run(self):

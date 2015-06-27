@@ -21,7 +21,10 @@ email                : motta.luiz@gmail.com
 
 import urllib2
 from datetime import datetime
-from os.path import basename
+from os.path import ( basename, dirname, sep as sepPath, isdir )
+from os import makedirs
+
+import json
 
 from PyQt4.QtCore import ( 
      Qt, QObject, QTimer, QThread, QFileInfo, QDir, QVariant, QCoreApplication,
@@ -329,7 +332,7 @@ class WorkerPopulateGroup(QObject):
 class CatalogOTF(QObject):
   
   # Signals 
-  settedLayer = pyqtSignal( str, str )
+  settedLayer = pyqtSignal( "QgsVectorLayer")
   removedLayer = pyqtSignal( str )
   changedNameLayer = pyqtSignal( str, str )
   changedNameGroup = pyqtSignal( str, str )
@@ -694,11 +697,12 @@ class CatalogOTF(QObject):
 
     self.layer = layer
     self.layerName = layer.name()
+    self.selectedImage = True if layer.selectedFeatureCount() > 0 else False 
     self.featureImage = FeatureImage( layer, self.iface )
     self.nameFieldSource = nameFiedlsCatalog[ 'nameSource' ]
     self.nameFieldDate = nameFiedlsCatalog[ 'nameDate' ]
     setDicImages()
-    self.settedLayer.emit( self.layer.id(), self.layer.name() )
+    self.settedLayer.emit( self.layer )
 
   def removeLayerCatalog(self):
     self.featureImage.clear()
@@ -809,8 +813,8 @@ class TableCatalogOTF(QObject):
     #
     self.checkedState.emit( self._getLayerID( row ), checkBoxs[ column ], check )
 
-  @pyqtSlot( str, str )
-  def insertRow(self, layerID, layerName):
+  @pyqtSlot( "QgsVectorLayer")
+  def insertRow(self, layer):
     ss = { 'signal': self.tableWidget.itemChanged , 'slot': self.itemChanged   }
     ss['signal'].disconnect( ss['slot'] )
     #
@@ -820,6 +824,8 @@ class TableCatalogOTF(QObject):
     # "Layer", "Group", "Total", "Select", "Highlight", "Zoom" 
     #
     lenTexts = 3
+    #
+    ( layerID, layerName ) = ( layer.id(), layer.name() )
     #
     column = 0 # Layer
     item = QTableWidgetItem( layerName )
@@ -839,6 +845,10 @@ class TableCatalogOTF(QObject):
       item.setFlags( Qt.ItemIsSelectable | Qt.ItemIsUserCheckable )
       item.setCheckState(Qt.Unchecked)
       self.tableWidget.setItem( row, column, item )
+    #
+    if layer.selectedFeatureCount() > 0: # "Select"
+      column = lenTexts
+      self.tableWidget.item( row, column ).setCheckState(Qt.Checked)
     #
     self.tableWidget.resizeColumnsToContents()
     ss['signal'].connect( ss['slot'] )
@@ -943,7 +953,7 @@ class DockWidgetCatalogOTF(QDockWidget):
         msgtrans = msgtrans1 if isOk else msgtrans2
         tempDir.setPath( WorkerPopulateGroup.TEMP_DIR )
         msg = msgtrans % tempDir.absolutePath()
-        msgBar.pushMessage( NAME_PLUGIN, msg, QgsMessageBar.CRITICAL, 5 )
+        msgBar.pushMessage( NAME_PLUGIN, msg, QpluginNamegsMessageBar.CRITICAL, 5 )
     
     find = False
     f = lambda item: \
@@ -970,3 +980,68 @@ class DockWidgetCatalogOTF(QDockWidget):
       msgBar.pushMessage( NAME_PLUGIN, msg, QgsMessageBar.INFO, 3 )
     else:
       checkTempDir()
+
+class ProjectDockWidgetCatalogOTF():
+
+  pluginName = "Plugin_DockWidget_Catalog_OTF"
+  pluginSetting = "/images_wms"
+  nameTmpDir = "tmp"
+
+  def __init__(self, iface):
+    self.iface = iface
+    
+  @pyqtSlot("QDomDocument")
+  def onReadProject(self, document):
+    def createTmpDir():
+      tmpDir = "%s%s" % ( sepPath, self.nameTmpDir )
+      if not isdir( tmpDir ):
+        makedirs( tmpDir )
+
+    proj = QgsProject.instance()
+    value, ok = proj.readEntry( self.pluginName, self.pluginSetting )
+    if ok and bool( value ):
+      createTmpDir()
+      newImages = 0
+      for item in json.loads( value ):
+        source = item['source']
+        if not QFileInfo( source ).exists():
+          fw = open( source, 'w' )
+          fw.write( item[ 'wms' ] )
+          fw.close()
+          newImages += 1
+      if newImages > 0:
+        msg = "Please reopen project - DON'T SAVE. The WMS images were regenerated (%d images)" % newImages
+        self.iface.messageBar().pushMessage( NAME_PLUGIN, msg, QgsMessageBar.WARNING, 8 )
+
+  @pyqtSlot("QDomDocument")
+  def onWriteProject(self, document):
+    def getContentFile( source ):
+      with open( source, 'r' ) as content_file:
+        content = content_file.read()
+      return content
+
+    def filter_wms_tmp( layer ):
+      if not layer.type() == QgsMapLayer.RasterLayer:
+        return False
+
+      metadata = layer.metadata()
+      if not ( metadata.find( "GDAL provider" ) != -1 and metadata.find( "OGC Web Map Service" ) != -1  ):
+        return False
+
+      lstDir = dirname( layer.source() ).split( sepPath)
+      if not ( len( lstDir) == 2 and lstDir[1] == self.nameTmpDir ):
+        return False
+      
+      return True
+
+    layers = map ( lambda item: item.layer(), self.iface.layerTreeView().layerTreeModel().rootGroup().findLayers() )
+    layers_wms_tmp = filter( filter_wms_tmp, layers )
+    images_wms = []
+    for item in layers_wms_tmp:
+      source = item.source()
+      images_wms.append( { 'source': source, 'wms': getContentFile( source) } )
+    proj = QgsProject.instance()
+    if len( images_wms ) == 0:
+      proj.removeEntry( self.pluginName, self.pluginSetting )
+    else:
+      proj.writeEntry( self.pluginName, self.pluginSetting, json.dumps( images_wms ) )
