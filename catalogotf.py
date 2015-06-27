@@ -739,7 +739,6 @@ class CatalogOTF(QObject):
 
   def enableSelected(self, on=True):
     self.selectedImage = on
-    self._populateGroupCatalog()
 
 
 class TableCatalogOTF(QObject):
@@ -805,12 +804,6 @@ class TableCatalogOTF(QObject):
     #
     row = item.row()
     check = item.checkState()
-    if column == 0:
-      ss = { 'signal': self.tableWidget.itemChanged , 'slot': self.itemChanged   }
-      ss['signal'].disconnect( ss['slot'] )
-      self.setFlagsByCheck( row, check, range(3, 6, 1) )
-      ss['signal'].connect( ss['slot'] )
-    #
     self.checkedState.emit( self._getLayerID( row ), checkBoxs[ column ], check )
 
   @pyqtSlot( "QgsVectorLayer")
@@ -842,13 +835,13 @@ class TableCatalogOTF(QObject):
     # Check's
     for column in range( lenTexts, self.tableWidget.columnCount() ):
       item = QTableWidgetItem()
-      item.setFlags( Qt.ItemIsSelectable | Qt.ItemIsUserCheckable )
+      item.setFlags( Qt.ItemIsSelectable | Qt.ItemIsUserCheckable | Qt.ItemIsEnabled  )
       item.setCheckState(Qt.Unchecked)
       self.tableWidget.setItem( row, column, item )
     #
     if layer.selectedFeatureCount() > 0: # "Select"
       column = lenTexts
-      self.tableWidget.item( row, column ).setCheckState(Qt.Checked)
+      self.tableWidget.item( row, column ).setCheckState( Qt.Checked )
     #
     self.tableWidget.resizeColumnsToContents()
     ss['signal'].connect( ss['slot'] )
