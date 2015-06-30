@@ -3,9 +3,10 @@ name=Catalog on the fly
 description=Automatically adds images that are in the catalog layer that intersect with the map area.
 about=This plugin work with catalog layer.
   Catalog layer need be the polygon layer and have two fields, source image(string) and date of image(date).
+  See presentation in http://pt.slideshare.net/LuizMotta3/presentation-2015-0701ibamaplugins
+  See video for use this plugin: https://youtu.be/2S3RlWr0uQg
   This plugin is developed on the demand of IBAMA(Brazilian Institute of Environment and Renewable Natural Resources)
   http://www.ibama.gov.br
-  See video for use this plugin: https://youtu.be/2S3RlWr0uQg
 version=0.7
 qgisMinimumVersion=2.8
 category=Raster
