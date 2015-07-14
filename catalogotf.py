@@ -27,22 +27,24 @@ from os import makedirs
 import json
 
 from PyQt4.QtCore import ( 
-     Qt, QObject, QTimer, QThread, QFileInfo, QDir, QVariant, QCoreApplication,
+     Qt, QObject, QTimer, QThread, QFileInfo, QFile, QDir, QIODevice, QVariant, QCoreApplication,
      QPyNullVariant, pyqtSignal, pyqtSlot
 )
-
 from PyQt4.QtGui  import (
-     QApplication,  QCursor,
+     QAction,
+     QApplication,  QCursor, QColor,
      QTableWidget, QTableWidgetItem,
      QPushButton, QGridLayout, QProgressBar, QDockWidget, QWidget
 )
+from PyQt4.QtXml import QDomDocument
 
-from qgis.gui import ( QgsHighlight, QgsMessageBar ) 
+import qgis
+from qgis.gui import ( QgsRubberBand, QgsHighlight, QgsMessageBar ) 
 from qgis.core import (
   QgsProject, QGis,
   QgsMapLayerRegistry, QgsMapLayer,
-  QgsFeature, QgsFeatureRequest, QgsGeometry, QgsSpatialIndex,
-  QgsCoordinateTransform,
+  QgsFeature, QgsFeatureRequest, QgsGeometry, QgsRectangle,  QgsSpatialIndex,
+  QgsCoordinateTransform, QgsCoordinateReferenceSystem,
   QgsRasterLayer, QgsRasterTransparency,
   QgsLayerTreeNode
 )
@@ -123,6 +125,116 @@ class FeatureImage:
   def msgError(self):
     return self.msgError
 
+class LegendTMS():
+
+  def __init__(self, parentMenu='TMS'):
+    def initLegendLayer():
+      self.legendLayer = [
+        {
+          'menu': u"Highlight",
+          'id': "idHighlight",
+          'slot': self.highlight,
+          'action': None
+        },
+        {
+          'menu': u"Zoom to",
+          'id': "idZoom",
+          'slot': self.zoom,
+          'action': None
+        }
+      ]
+      for item in self.legendLayer:
+        item['action'] = QAction( item['menu'], None )
+        item['action'].triggered.connect( item['slot'] )
+        self.legendInterface.addLegendLayerAction( item['action'], parentMenu, item['id'], QgsMapLayer.RasterLayer, False )
+
+    self.legendInterface = qgis.utils.iface.legendInterface()
+    self.legendLayer =  None
+    initLegendLayer()
+
+  def __del__(self):
+    for item in self.legendLayer:
+      self.legendInterface.removeLegendLayerAction( item['action'] )
+
+  def setLayer(self, layer):
+    for item in self.legendLayer:
+      self.legendInterface.addLegendLayerActionForLayer( item['action'],  layer )
+
+  def hasTargetWindows(self, layer ):
+    doc = QDomDocument()
+    file = QFile( layer.source() )
+    if not file.open( QIODevice.ReadOnly ):
+     return False
+
+    doc.setContent( file )
+    file.close()
+
+    nodes = doc.elementsByTagName( 'TargetWindow' )
+    return True if nodes.count() > 0 else False
+
+  def _getRectTargetWindow(self, canvas, layer):
+    def getTargetWindows():
+      doc = QDomDocument()
+      file = QFile( layer.source() )
+      if not file.open( QIODevice.ReadOnly ):
+       return None
+
+      doc.setContent( file )
+      file.close()
+
+      nodes = doc.elementsByTagName( 'TargetWindow' )
+      if nodes.count == 0:
+        return None
+
+      node = nodes.item( 0 )
+      targetWindow = { 'ulX': None, 'ulY': None, 'lrX': None, 'lrY': None }
+      labels = { 'UpperLeftX': 'ulX', 'UpperLeftY': 'ulY', 'LowerRightX': 'lrX', 'LowerRightY': 'lrY' }
+      for key, value in labels.iteritems():
+        text = node.firstChildElement( key ).text()
+        if len( text ) == 0:
+          continue
+        targetWindow[ value ] = float( text )
+
+      if None in targetWindow.values():
+        return None
+
+      return targetWindow
+
+    tw = getTargetWindows()
+    rect =  QgsRectangle( tw['ulX'], tw['lrY'], tw['lrX'], tw['ulY'] )
+    cr3857 = QgsCoordinateReferenceSystem( 3857, QgsCoordinateReferenceSystem.EpsgCrsId )
+    crsCanvas = canvas.mapSettings().destinationCrs()
+    ctCanvas = QgsCoordinateTransform( cr3857, crsCanvas )
+
+    return ctCanvas.transform( rect )
+
+  def _highlight(self, canvas, extent ):
+    def removeRB():
+      rb.reset( True )
+      canvas.scene().removeItem( rb )
+    
+    rb = QgsRubberBand( canvas, QGis.Polygon)
+    rb.setBorderColor( QColor( 255,  0, 0 ) )
+    rb.setWidth( 2 )
+    rb.setToGeometry( QgsGeometry.fromRect( extent ), None )
+    QTimer.singleShot( 2000, removeRB )
+
+  @pyqtSlot()
+  def highlight(self):
+    canvas = qgis.utils.iface.mapCanvas()
+    layer = self.legendInterface.currentLayer()
+    extent = self._getRectTargetWindow( canvas, layer )
+    self._highlight( canvas, extent )
+
+  @pyqtSlot()
+  def zoom(self):
+    canvas = qgis.utils.iface.mapCanvas()
+    layer = self.legendInterface.currentLayer()
+    extent = self._getRectTargetWindow( canvas, layer )
+    canvas.setExtent( extent )
+    canvas.refresh()
+    self._highlight( canvas, extent )
+
 
 class WorkerPopulateGroup(QObject):
 
@@ -134,12 +246,13 @@ class WorkerPopulateGroup(QObject):
   messageStatus = pyqtSignal( str )
   messageError = pyqtSignal( str )
 
-  def __init__(self, canvas):
+  def __init__(self, addLegendLayer):
     
     super(WorkerPopulateGroup, self).__init__()
     self.killed = False
     #
-    self.canvas = canvas
+    self.canvas = qgis.utils.iface.mapCanvas()
+    self.addLegendLayer = addLegendLayer
     self.dicImages = self.nameFieldSource = self.layer = self.ltgCatalog = self.selectedImage = None
 
   def setData(self, data):
@@ -303,6 +416,7 @@ class WorkerPopulateGroup(QObject):
           ltl.setVisible( Qt.Unchecked )
           name = "%s (%s)" % ( l_fileinfo_date[ id ]['date'].toString( "yyyy-MM-dd" ), l_image[ id ] )
           ltl.setLayerName( name )
+          self.addLegendLayer( l_layer[ id ] )
         #
         cleanLists( [ l_image, l_fileinfo_date, l_raster, l_layer ] )
       #
@@ -356,6 +470,7 @@ class CatalogOTF(QObject):
     self.model = self.ltv.layerTreeModel()
     self.ltgRoot = QgsProject.instance().layerTreeRoot()
     self.msgBar = iface.messageBar()
+    self.legendTMS = LegendTMS( 'Catalog TMS')
     #
     self._initThread()
     #
@@ -369,8 +484,10 @@ class CatalogOTF(QObject):
 
   def __del__(self):
     self._finishThread()
-    
-  def _connect(self, isConnect = True):
+    del self.legendTMS
+    QgsMapLayerRegistry.instance().layersWillBeRemoved.disconnect( self.layersWillBeRemoved ) # Catalog layer removed
+
+  def _connectCatalog(self, isConnect = True):
     ss = [
       { 'signal': self.canvas.extentsChanged , 'slot': self.extentsChanged },
       { 'signal': self.canvas.destinationCrsChanged, 'slot': self.destinationCrsChanged_MapUnitsChanged },
@@ -390,7 +507,7 @@ class CatalogOTF(QObject):
   def _initThread(self):
     self.thread = QThread( self )
     self.thread.setObjectName( "QGIS_Plugin_%s" % NAME_PLUGIN )
-    self.worker = WorkerPopulateGroup( self.canvas )
+    self.worker = WorkerPopulateGroup( self.addLegendLayer )
     self.worker.moveToThread( self.thread )
     self._connectWorker()
 
@@ -414,6 +531,13 @@ class CatalogOTF(QObject):
     else:
       for item in ss:
         item['signal'].disconnect( item['slot'] )
+
+  def addLegendLayer(self, layer):
+    if layer.type() == QgsMapLayer.RasterLayer:  
+      metadata = layer.metadata()
+      if metadata.find( "GDAL provider" ) != -1 and metadata.find( "OGC Web Map Service" ) != -1:
+        if self.legendTMS.hasTargetWindows( layer ):
+          self.legendTMS.setLayer( layer )
 
   def _setFeatureImage(self, layer):
     if layer is None or \
@@ -584,6 +708,8 @@ class CatalogOTF(QObject):
 
   @pyqtSlot( list )
   def layersWillBeRemoved(self, layerIds):
+    if self.layer is None:
+      return
     if self.layer.id() in layerIds:
       self.removedLayer.emit( self.layer.id() )
       self.removeLayerCatalog()
@@ -718,10 +844,10 @@ class CatalogOTF(QObject):
     if on:
       self._setGroupCatalog()
       self.ltgCatalogName = self.ltgCatalog.name()
-      self._connect( True )
+      self._connectCatalog( True )
       self.extentsChanged()
     else:
-      self._connect( False )
+      self._connectCatalog( False )
     
   def enableZoom(self, on=True):
     self.zoomImage = on
@@ -936,6 +1062,12 @@ class DockWidgetCatalogOTF(QDockWidget):
 
   @pyqtSlot()
   def findCatalogs(self):
+    def addLegendImages(layer):
+     name = "%s - Catalog" % layer.name()
+     ltgCatalog = QgsProject.instance().layerTreeRoot().findGroup( name  )
+     if not ltgCatalog is None:
+      for item in map( lambda item: item.layer(), ltgCatalog.findLayers() ):
+        self.cotf[ layerID ].addLegendLayer( item )
 
     def checkTempDir():
       tempDir = QDir( WorkerPopulateGroup.TEMP_DIR )
@@ -947,7 +1079,15 @@ class DockWidgetCatalogOTF(QDockWidget):
         tempDir.setPath( WorkerPopulateGroup.TEMP_DIR )
         msg = msgtrans % tempDir.absolutePath()
         msgBar.pushMessage( NAME_PLUGIN, msg, QpluginNamegsMessageBar.CRITICAL, 5 )
-    
+
+    def overrideCursor():
+      cursor = QApplication.overrideCursor()
+      if cursor is None or cursor == 0:
+          QApplication.setOverrideCursor( QCursor( Qt.WaitCursor ) )
+      elif cursor.shape() != Qt.WaitCursor:
+          QApplication.setOverrideCursor( QCursor( Qt.WaitCursor ) )
+
+    overrideCursor()
     find = False
     f = lambda item: \
         item.type() == QgsMapLayer.VectorLayer and \
@@ -960,6 +1100,7 @@ class DockWidgetCatalogOTF(QDockWidget):
         self.cotf[ layerID ] = CatalogOTF( self.iface, self.tbl_cotf )
         self.cotf[ layerID ].removedLayer.connect( self.removeLayer )
         self.cotf[ layerID ].setLayerCatalog( item, nameFiedlsCatalog )
+        addLegendImages( item )
         find = True
     #
     msgBar = self.iface.messageBar()
@@ -974,6 +1115,9 @@ class DockWidgetCatalogOTF(QDockWidget):
     else:
       checkTempDir()
 
+    QApplication.restoreOverrideCursor()
+
+
 class ProjectDockWidgetCatalogOTF():
 
   pluginName = "Plugin_DockWidget_Catalog_OTF"
@@ -982,7 +1126,7 @@ class ProjectDockWidgetCatalogOTF():
 
   def __init__(self, iface):
     self.iface = iface
-    
+
   @pyqtSlot("QDomDocument")
   def onReadProject(self, document):
     def createTmpDir():

@@ -12,6 +12,11 @@ Automatically adds  images that are in the catalog layer that intersect with the
 Luiz Motta
 
 ## Changelog
+- 2015-07-13
+Added context menu for TMS image
+- 2015-06-27
+Use project file for save GDAL_WMS raster inside.
+Update selected check behavior 
 - 2015-06-01
 Correction for identify catalog from Postgres.
 Removed FID = 0 in getNameFieldsCatalog().getFirstFeature(), first FID for Postfgres is 1 and not 0

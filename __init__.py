@@ -24,7 +24,7 @@ import os.path
 from PyQt4.QtGui import ( QAction, QIcon )
 from PyQt4.QtCore import ( Qt, QSettings, QTranslator, QCoreApplication, qVersion, pyqtSlot )
 
-from qgis.core import ( QgsProject )
+from qgis.core import ( QgsProject, QgsMapLayerRegistry )
 
 from catalogotf import ( ProjectDockWidgetCatalogOTF, DockWidgetCatalogOTF )
 

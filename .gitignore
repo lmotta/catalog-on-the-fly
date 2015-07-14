@@ -3,7 +3,6 @@
 *.pyc
 *.zip
 *.sh
-resources_rc.py
 # Ignore
 !create_zip_plugin.sh
 # Diretory ./i18n NEED .gitignore!
