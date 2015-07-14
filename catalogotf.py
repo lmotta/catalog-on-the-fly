@@ -880,7 +880,7 @@ class TableCatalogOTF(QObject):
   def _init(self):
     self.tableWidget.setWindowTitle("Catalog OTF")
     self.tableWidget.setSortingEnabled( False )
-    msgtrans = QCoreApplication.translate("CatalogOTF", "Layer,Group,Total,Select,Highlight,Zoom")
+    msgtrans = QCoreApplication.translate("CatalogOTF", "Layer,Group,Total,Selected,Highlight,Zoom")
     headers = msgtrans.split(',')
     self.tableWidget.setColumnCount( len( headers ) )
     self.tableWidget.setHorizontalHeaderLabels( headers )
