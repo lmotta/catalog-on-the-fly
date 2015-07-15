@@ -92,6 +92,7 @@ class LegendRaster(object):
     layer = self.legendInterface.currentLayer()
     extent = self._getExtent( canvas, layer )
     canvas.setExtent( extent )
+    canvas.zoomByFactor( 1.05 )
     canvas.refresh()
     self._highlight( canvas, extent )
 
