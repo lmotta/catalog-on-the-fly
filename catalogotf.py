@@ -21,220 +21,37 @@ email                : motta.luiz@gmail.com
 
 import urllib2
 from datetime import datetime
-from os.path import ( basename, dirname, sep as sepPath, isdir )
+from os.path import ( basename, dirname, sep as sepPath, isdir, join as joinPath )
 from os import makedirs
 
 import json
 
 from PyQt4.QtCore import ( 
-     Qt, QObject, QTimer, QThread, QFileInfo, QFile, QDir, QIODevice, QVariant, QCoreApplication,
+     Qt, QObject, QThread, QFileInfo, QDir, QVariant, QCoreApplication,
      QPyNullVariant, pyqtSignal, pyqtSlot
 )
 from PyQt4.QtGui  import (
      QAction,
-     QApplication,  QCursor, QColor,
+     QApplication,  QCursor, QColor, QIcon,
      QTableWidget, QTableWidgetItem,
      QPushButton, QGridLayout, QProgressBar, QDockWidget, QWidget
 )
 from PyQt4.QtXml import QDomDocument
 
 import qgis
-from qgis.gui import ( QgsRubberBand, QgsHighlight, QgsMessageBar ) 
+from qgis.gui import ( QgsMessageBar ) 
 from qgis.core import (
   QgsProject, QGis,
   QgsMapLayerRegistry, QgsMapLayer,
   QgsFeature, QgsFeatureRequest, QgsGeometry, QgsRectangle,  QgsSpatialIndex,
-  QgsCoordinateTransform, QgsCoordinateReferenceSystem,
+  QgsCoordinateTransform,
   QgsRasterLayer, QgsRasterTransparency,
   QgsLayerTreeNode
 )
 
+from legendlayer import ( LegendRaster, LegendTMS )
+
 NAME_PLUGIN = "Catalog On The Fly"
-
-class FeatureImage:
-
-  def __init__(self, layer, iface):
-    self.layer = layer
-    self.canvas = iface.mapCanvas()
-    self._image = self.geom = self.hl = self.msgError = None
-
-  def _getGeometry(self, fid):
-    fr = QgsFeatureRequest( fid )
-    fr.setSubsetOfAttributes( [], self.layer.dataProvider().fields() )
-    it = self.layer.getFeatures( fr )
-    feat = QgsFeature()
-    isOk = it.nextFeature( feat )
-    it.close()
-
-    return QgsGeometry( feat.geometry() ) if isOk else None
-
-  def clear(self):
-    del self.geom
-    del self.hl
-    self._image = self.geom = self.hl = None
-
-  def setImage(self, image, dicImages):
-    if self._image == image:
-      return True
-    #
-    fid = dicImages[ image ]['id']
-    geom = self._getGeometry( fid )
-    if geom is None:
-      msgtrans = QCoreApplication.translate("CatalogOTF", "Geometry of feature (fid = %d) of layer ('%s') is invalid")
-      self.msgError = msgtrans % ( fid, self.layer.name() )
-      return False
-    #
-    self.geom = geom
-    self._image = image
-    #
-    del self.hl
-    self.hl = QgsHighlight( self.canvas, self.geom, self.layer )
-    self.hl.hide()
-    #
-    return True
-
-  def image(self):
-    return self._image
-
-  def hide(self):
-    self.hl.hide()
-    self.canvas.refresh()
-
-  def highlight(self, second=0 ):
-    if self.hl is None:
-      return
-    #
-    self.hl.setWidth( 5 )
-    self.hl.show()
-    self.canvas.refresh()
-    #
-    QTimer.singleShot( second * 1000, self.hide )
-
-  def zoom(self):
-    if self.geom is None:
-      return
-    #
-    crsCanvas = self.canvas.mapSettings().destinationCrs()
-    crsLayer = self.layer.crs()
-    ct = QgsCoordinateTransform( crsCanvas, crsLayer )
-    extent = self.geom.boundingBox() if crsCanvas == crsLayer else ct.transform( self.geom.boundingBox() )
-    #
-    self.canvas.setExtent( extent )
-    self.canvas.refresh()
-
-  def msgError(self):
-    return self.msgError
-
-class LegendTMS():
-
-  def __init__(self, parentMenu='TMS'):
-    def initLegendLayer():
-      self.legendLayer = [
-        {
-          'menu': u"Highlight",
-          'id': "idHighlight",
-          'slot': self.highlight,
-          'action': None
-        },
-        {
-          'menu': u"Zoom to",
-          'id': "idZoom",
-          'slot': self.zoom,
-          'action': None
-        }
-      ]
-      for item in self.legendLayer:
-        item['action'] = QAction( item['menu'], None )
-        item['action'].triggered.connect( item['slot'] )
-        self.legendInterface.addLegendLayerAction( item['action'], parentMenu, item['id'], QgsMapLayer.RasterLayer, False )
-
-    self.legendInterface = qgis.utils.iface.legendInterface()
-    self.legendLayer =  None
-    initLegendLayer()
-
-  def __del__(self):
-    for item in self.legendLayer:
-      self.legendInterface.removeLegendLayerAction( item['action'] )
-
-  def setLayer(self, layer):
-    for item in self.legendLayer:
-      self.legendInterface.addLegendLayerActionForLayer( item['action'],  layer )
-
-  def hasTargetWindows(self, layer ):
-    doc = QDomDocument()
-    file = QFile( layer.source() )
-    if not file.open( QIODevice.ReadOnly ):
-     return False
-
-    doc.setContent( file )
-    file.close()
-
-    nodes = doc.elementsByTagName( 'TargetWindow' )
-    return True if nodes.count() > 0 else False
-
-  def _getRectTargetWindow(self, canvas, layer):
-    def getTargetWindows():
-      doc = QDomDocument()
-      file = QFile( layer.source() )
-      if not file.open( QIODevice.ReadOnly ):
-       return None
-
-      doc.setContent( file )
-      file.close()
-
-      nodes = doc.elementsByTagName( 'TargetWindow' )
-      if nodes.count == 0:
-        return None
-
-      node = nodes.item( 0 )
-      targetWindow = { 'ulX': None, 'ulY': None, 'lrX': None, 'lrY': None }
-      labels = { 'UpperLeftX': 'ulX', 'UpperLeftY': 'ulY', 'LowerRightX': 'lrX', 'LowerRightY': 'lrY' }
-      for key, value in labels.iteritems():
-        text = node.firstChildElement( key ).text()
-        if len( text ) == 0:
-          continue
-        targetWindow[ value ] = float( text )
-
-      if None in targetWindow.values():
-        return None
-
-      return targetWindow
-
-    tw = getTargetWindows()
-    rect =  QgsRectangle( tw['ulX'], tw['lrY'], tw['lrX'], tw['ulY'] )
-    cr3857 = QgsCoordinateReferenceSystem( 3857, QgsCoordinateReferenceSystem.EpsgCrsId )
-    crsCanvas = canvas.mapSettings().destinationCrs()
-    ctCanvas = QgsCoordinateTransform( cr3857, crsCanvas )
-
-    return ctCanvas.transform( rect )
-
-  def _highlight(self, canvas, extent ):
-    def removeRB():
-      rb.reset( True )
-      canvas.scene().removeItem( rb )
-    
-    rb = QgsRubberBand( canvas, QGis.Polygon)
-    rb.setBorderColor( QColor( 255,  0, 0 ) )
-    rb.setWidth( 2 )
-    rb.setToGeometry( QgsGeometry.fromRect( extent ), None )
-    QTimer.singleShot( 2000, removeRB )
-
-  @pyqtSlot()
-  def highlight(self):
-    canvas = qgis.utils.iface.mapCanvas()
-    layer = self.legendInterface.currentLayer()
-    extent = self._getRectTargetWindow( canvas, layer )
-    self._highlight( canvas, extent )
-
-  @pyqtSlot()
-  def zoom(self):
-    canvas = qgis.utils.iface.mapCanvas()
-    layer = self.legendInterface.currentLayer()
-    extent = self._getRectTargetWindow( canvas, layer )
-    canvas.setExtent( extent )
-    canvas.refresh()
-    self._highlight( canvas, extent )
-
 
 class WorkerPopulateGroup(QObject):
 
@@ -253,14 +70,13 @@ class WorkerPopulateGroup(QObject):
     #
     self.canvas = qgis.utils.iface.mapCanvas()
     self.addLegendLayer = addLegendLayer
-    self.dicImages = self.nameFieldSource = self.layer = self.ltgCatalog = self.selectedImage = None
+    self.nameFieldSource = self.layer = self.ltgCatalog = None
 
   def setData(self, data):
-    self.dicImages = data['dicImages']
-    self.nameFieldSource = data['nameFieldSource']
-    self.layer = data['layer']
-    self.ltgCatalog = data['ltgCatalog']
-    self.selectedImage = data['selectedImage']
+    self.nameFieldSource = data[ 'nameFieldSource' ]
+    self.nameFieldDate = data[ 'nameFieldDate' ]
+    self.layer = data[ 'layer' ]
+    self.ltgCatalog = data[ 'ltgCatalog' ]
 
   @pyqtSlot()
   def run(self):
@@ -268,7 +84,8 @@ class WorkerPopulateGroup(QObject):
     def getImagesByCanvas():
       images = []
       #
-      rectLayer = self.layer.extent() if not self.selectedImage else self.layer.boundingBoxOfSelected()
+      selectedImage = self.layer.selectedFeatureCount() > 0
+      rectLayer = self.layer.extent() if not selectedImage else self.layer.boundingBoxOfSelected()
       crsLayer = self.layer.crs()
       #
       crsCanvas = self.canvas.mapSettings().destinationCrs()
@@ -279,9 +96,8 @@ class WorkerPopulateGroup(QObject):
         return [] 
       #
       fr = QgsFeatureRequest()
-      if self.selectedImage:
+      if selectedImage:
         fr.setFilterFids( self.layer.selectedFeaturesIds() )
-      #fr.setSubsetOfAttributes( [ self.nameFieldSource ], self.layer.dataProvider().fields() )
       index = QgsSpatialIndex( self.layer.getFeatures( fr ) )
       fids = index.intersects( rectCanvas )
       #
@@ -294,7 +110,9 @@ class WorkerPopulateGroup(QObject):
       f = QgsFeature()
       while it.nextFeature( f ):
         if f.geometry().intersects( rectCanvas ):
-          images.append( basename( f[ self.nameFieldSource ] ) )
+          source = f[ self.nameFieldSource ]
+          vdate =  f[ self.nameFieldDate ]
+          images.append( { 'source': source, 'date': vdate } )
       #
       del fids[:]
       #
@@ -324,12 +142,13 @@ class WorkerPopulateGroup(QObject):
           #
           return fileInfo
 
-        value = self.dicImages[ image ]
-        source = value['source']
+        source = image[ 'source' ]
         isUrl = source.find('http://') == 0 or source.find('https://') == 0
+        lenSource = len( source)
+        isUrl = isUrl and source.rfind( 'xml', lenSource - len( 'xml' ) ) == lenSource - len( 'xml' )   
         fi = prepareFileTMS( source ) if isUrl else QFileInfo( source )
         #
-        return { 'fileinfo': fi, 'date': value['date'] }
+        return { 'fileinfo': fi, 'date': image[ 'date' ] }
       #
       
       def setTransparence():
@@ -344,6 +163,8 @@ class WorkerPopulateGroup(QObject):
         l_ttvp = getListTTVP()
         #
         for id in range( 0, len( l_raster ) ):
+          if self.isKilled:
+            return
           fileName = l_fileinfo_date[ id ]['fileinfo'].fileName()
           idExt = fileName.rfind( extension )
           if idExt == -1 or len( fileName ) != ( idExt + len ( extension ) ):
@@ -354,78 +175,88 @@ class WorkerPopulateGroup(QObject):
           del item[:]
       
       # Sorted images 
-      l_image_date = map( lambda item: { '_image': item, 'date': self.dicImages [ item ]['date'] }, images )
-      l_image_date_sorted = sorted( l_image_date, key = lambda item: item['date'], reverse = True )
-      #
-      l_image =  map( lambda item: item['_image'], l_image_date_sorted )
-      #
-      del l_image_date[:]
+      l_image_date_sorted = sorted( images, key = lambda item: item['date'], reverse = True )
+      l_fileinfo_date = map( getFileInfoDate, l_image_date_sorted )
       del l_image_date_sorted[:]
-      #
+
       totalRaster = -1 # isKilled
-      #
-      l_fileinfo_date = map( getFileInfoDate, l_image )
-      #
       if self.isKilled:
-        cleanLists( [ l_image, l_fileinfo_date ] )
+        del l_fileinfo_date[:]
         return totalRaster
-      #
+
       l_raster = map( lambda item: 
                         QgsRasterLayer( item['fileinfo'].filePath(), item['fileinfo'].baseName() ),
                         l_fileinfo_date )
-      #
-      if self.isKilled:
-        cleanLists( [ l_image, l_fileinfo_date, l_raster ] )
-        return totalRaster
-      #
+
+      # l_fileinfo_date[ {'fileinfo', 'date'} ], l_raster[ QgsRasterLayer ]
+
       # Invalid raster
       l_id_error = []
       for id in range( 0, len( l_raster ) ):
+        if self.isKilled:
+          break
         if not l_raster[ id ].isValid():
           l_id_error.append( id )
-      #
+      if self.isKilled:
+        cleanLists( [ l_fileinfo_date, l_raster, l_id_error ] )
+        return totalRaster
+
+      # l_fileinfo_date, l_raster, l_id_error[ id ]
+
       l_error = None
+      l_id_error.reverse()
       if len( l_id_error ) > 0:
-        l_error = map( lambda item: l_image[ item ], l_id_error )
-        #
-        l_removes = [ l_raster, l_fileinfo_date, l_image ]
+        l_error = map( lambda item: item.source(), l_raster )
+        l_removes = [ l_fileinfo_date, l_raster ]
         for id in l_id_error:
+          if self.isKilled:
+            break
           for item in l_removes:
             item.remove( item[ id ] )
         del l_id_error[:]
         del l_removes[:]
-      #
-      if self.isKilled:
-        cleanLists( [ l_image, l_fileinfo_date, l_raster, l_error ] )
-        return totalRaster
-      #
+        if self.isKilled:
+          cleanLists( [ l_fileinfo_date, l_raster, l_error ] )
+          return totalRaster
+
+      del l_id_error[:]
+      # l_fileinfo_date, l_raster, l_error
+
       totalRaster = len( l_raster ) 
       # Add raster
       if totalRaster > 0:
         setTransparence()
         l_layer = []
         for item in l_raster:
-          l_layer.append( QgsMapLayerRegistry.instance().addMapLayer( item, addToLegend=False ) )
-          #
           if self.isKilled:
-            cleanLists( [ l_image, l_fileinfo_date, l_raster, l_error, l_layer ] )
-            return -1
-          #
+            break
+          l_layer.append( QgsMapLayerRegistry.instance().addMapLayer( item, addToLegend=False ) )
+        if self.isKilled:
+          cleanLists( [ l_fileinfo_date, l_error, l_layer ] )
+          return -1
+
+        # l_fileinfo_date, l_error, l_layer
+
         for id in range( 0, len( l_layer ) ):
+          if self.isKilled:
+            break
           ltl = self.ltgCatalog.addLayer( l_layer[ id ] )
           ltl.setVisible( Qt.Unchecked )
-          name = "%s (%s)" % ( l_fileinfo_date[ id ]['date'].toString( "yyyy-MM-dd" ), l_image[ id ] )
+          vdate = l_fileinfo_date[ id ]['date'].toString( "yyyy-MM-dd" )
+          name = l_layer[ id ].name()
+          name = "%s (%s)" % ( vdate, name )
           ltl.setLayerName( name )
           self.addLegendLayer( l_layer[ id ] )
-        #
-        cleanLists( [ l_image, l_fileinfo_date, l_raster, l_layer ] )
-      #
+        cleanLists( [ l_fileinfo_date, l_layer ] )
+        if self.isKilled:
+          return -1
+
       # Message Error
       if not l_error is None:
         msgtrans = QCoreApplication.translate("CatalogOTF", "Images invalid:\n%s")
         self.messageError.emit( msgtrans % "\n" .join( l_error ) )
         del l_error[:]
-      #
+
       return totalRaster
 
     self.isKilled = False
@@ -435,7 +266,7 @@ class WorkerPopulateGroup(QObject):
     totalRaster = addImages()
     msg = "" if totalRaster == -1 else str( totalRaster ) 
     self.messageStatus.emit( msg )
-    #
+
     del images[:]
     self.finished.emit( self.isKilled )
 
@@ -448,10 +279,10 @@ class CatalogOTF(QObject):
   # Signals 
   settedLayer = pyqtSignal( "QgsVectorLayer")
   removedLayer = pyqtSignal( str )
+  killed = pyqtSignal( str )
   changedNameLayer = pyqtSignal( str, str )
-  changedNameGroup = pyqtSignal( str, str )
-  removedGroup = pyqtSignal( str )
   changedTotal = pyqtSignal( str, str )
+  changedIconRun = pyqtSignal( str, bool )
 
   def __init__(self, iface, tableCOTF):
     
@@ -459,10 +290,10 @@ class CatalogOTF(QObject):
       self.settedLayer.connect( tableCOTF.insertRow )
       self.removedLayer.connect( tableCOTF.removeRow )
       self.changedNameLayer.connect( tableCOTF.changedNameLayer )
-      self.changedNameGroup.connect( tableCOTF.changedNameGroup )
-      self.removedGroup.connect( tableCOTF.changedNameGroup )
       self.changedTotal.connect( tableCOTF.changedTotal )
-    
+      self.changedIconRun.connect( tableCOTF.changedIconRun )
+      self.killed.connect( tableCOTF.killed )
+
     super(CatalogOTF, self).__init__()
     self.iface = iface
     self.canvas = iface.mapCanvas()
@@ -470,44 +301,29 @@ class CatalogOTF(QObject):
     self.model = self.ltv.layerTreeModel()
     self.ltgRoot = QgsProject.instance().layerTreeRoot()
     self.msgBar = iface.messageBar()
-    self.legendTMS = LegendTMS( 'Catalog TMS')
-    #
+    self.legendTMS = LegendTMS( 'Catalog OTF')
+    self.legendRaster = LegendRaster( 'Catalog OTF')
+
     self._initThread()
-    #
+
     connecTableCOTF()
+    self.model.dataChanged.connect( self.dataChanged )
     QgsMapLayerRegistry.instance().layersWillBeRemoved.connect( self.layersWillBeRemoved ) # Catalog layer removed
-    #
+
     self.layer = self.layerName = self.nameFieldSource = self.nameFieldDate = None
-    self.ltgCatalog = self.ltgCatalogName = self.dicImages = None
-    self.featureImage = self.currentStatusLC = None
-    self.zoomImage = self.highlightImage = self.selectedImage = False
+    self.ltgCatalog = self.ltgCatalogName = self.hasCanceled = None
+    self.currentStatusLC = None
 
   def __del__(self):
     self._finishThread()
     del self.legendTMS
+    del self.legendRaster
     QgsMapLayerRegistry.instance().layersWillBeRemoved.disconnect( self.layersWillBeRemoved ) # Catalog layer removed
-
-  def _connectCatalog(self, isConnect = True):
-    ss = [
-      { 'signal': self.canvas.extentsChanged , 'slot': self.extentsChanged },
-      { 'signal': self.canvas.destinationCrsChanged, 'slot': self.destinationCrsChanged_MapUnitsChanged },
-      { 'signal': self.canvas.mapUnitsChanged, 'slot': self.destinationCrsChanged_MapUnitsChanged },
-      { 'signal': self.layer.selectionChanged, 'slot': self.selectionChanged },
-      { 'signal': self.ltv.activated, 'slot': self.activated },
-      { 'signal': self.model.dataChanged, 'slot': self.dataChanged },
-      { 'signal': self.ltgRoot.willRemoveChildren, 'slot': self.willRemoveChildren }
-    ]
-    if isConnect:
-      for item in ss:
-        item['signal'].connect( item['slot'] )  
-    else:
-      for item in ss:
-        item['signal'].disconnect( item['slot'] )
 
   def _initThread(self):
     self.thread = QThread( self )
-    self.thread.setObjectName( "QGIS_Plugin_%s" % NAME_PLUGIN )
-    self.worker = WorkerPopulateGroup( self.addLegendLayer )
+    self.thread.setObjectName( "QGIS_Plugin_%s" % NAME_PLUGIN.replace( ' ', '_' ) )
+    self.worker = WorkerPopulateGroup( self.addLegendLayerWorker )
     self.worker.moveToThread( self.thread )
     self._connectWorker()
 
@@ -532,44 +348,49 @@ class CatalogOTF(QObject):
       for item in ss:
         item['signal'].disconnect( item['slot'] )
 
-  def addLegendLayer(self, layer):
+  def addLegendLayerWorker(self, layer):
     if layer.type() == QgsMapLayer.RasterLayer:  
       metadata = layer.metadata()
-      if metadata.find( "GDAL provider" ) != -1 and metadata.find( "OGC Web Map Service" ) != -1:
-        if self.legendTMS.hasTargetWindows( layer ):
-          self.legendTMS.setLayer( layer )
+      if metadata.find( "GDAL provider" ) != -1:
+        if  metadata.find( "OGC Web Map Service" ) != -1:
+          if self.legendTMS.hasTargetWindows( layer ):
+            self.legendTMS.setLayer( layer )
+        else:
+          self.legendRaster.setLayer( layer )
 
-  def _setFeatureImage(self, layer):
-    if layer is None or \
-       layer.type() != QgsMapLayer.RasterLayer or \
-       self.ltgCatalog is None or \
-       self.ltgCatalog.findLayer( layer.id() ) is None:
-      #
-      return False
-    #
-    image = basename( layer.source() )
-    if not image in self.dicImages .keys():
-      msgtrans = QCoreApplication.translate("CatalogOTF", "Image (%s) not in catalog layer ('%s')")
-      msg = msgtrans % ( image, self.layer.name() )
-      self.msgBar.pushMessage( NAME_PLUGIN, msg, QgsMessageBar.CRITICAL, 4 )
-      #
-      return False
-    #
-    if not self.featureImage.setImage( image, self.dicImages ):
-      self.msgBar.pushMessage( NAME_PLUGIN, self.featureImage.msgError(), QgsMessageBar.CRITICAL, 4 )
-      #
-      return False
-    #
-    return True
+  def run(self):
+    self.hasCanceled = False # Check in finishedPG
+
+    if self.thread.isRunning():
+      self.worker.kill()
+      self.hasCanceled = True
+      msgtrans = QCoreApplication.translate("CatalogOTF", "Canceled search for image from layer ")
+      msgtrans += self.layerName 
+      self.msgBar.pushMessage( NAME_PLUGIN, msgtrans, QgsMessageBar.WARNING, 2 )
+      self.changedTotal.emit( self.layer.id(), "Canceling processing")
+      self.killed.emit( self.layer.id() )
+      return
+
+    if self.layer is None:
+      msgtrans = QCoreApplication.translate("CatalogOTF", "Need define layer catalog")
+      self.msgBar.pushMessage( NAME_PLUGIN, msgtrans, QgsMessageBar.WARNING, 2 )
+      return
+
+    self._setGroupCatalog()
+    self.ltgCatalogName = self.ltgCatalog.name()
+
+    renderFlag = self.canvas.renderFlag()
+    if renderFlag:
+      self.canvas.setRenderFlag( False )
+      self.canvas.stopRendering()
+
+    self._populateGroupCatalog()
+
+    if renderFlag:
+      self.canvas.setRenderFlag( True )
+      self.canvas.refresh()
 
   def _populateGroupCatalog(self):
-
-    def overrideCursor():
-      cursor = QApplication.overrideCursor()
-      if cursor is None or cursor == 0:
-          QApplication.setOverrideCursor( QCursor( Qt.WaitCursor ) )
-      elif cursor.shape() != Qt.WaitCursor:
-          QApplication.setOverrideCursor( QCursor( Qt.WaitCursor ) )
 
     def getCurrentStatusLayerCatalog():
       node = self.ltv.currentNode()
@@ -584,20 +405,14 @@ class CatalogOTF(QObject):
 
     def runWorker():
       data = {}
-      data['dicImages'] = self.dicImages
+      data['nameFieldDate'] = self.nameFieldDate
       data['nameFieldSource'] = self.nameFieldSource
       data['layer'] = self.layer
       data['ltgCatalog'] = self.ltgCatalog
-      data['selectedImage'] = self.selectedImage
       self.worker.setData( data )
       self.thread.start()
-    #
-    if self.thread.isRunning():
-      self.worker.kill()
-      return
-    #
-    self.ltv.activated.disconnect( self.activated )
-    overrideCursor()
+      #self.worker.run() # DEBUG
+
     self.currentStatusLC = getCurrentStatusLayerCatalog()
     self.ltgCatalog.removeAllChildren()
     #
@@ -605,34 +420,16 @@ class CatalogOTF(QObject):
 
   def _setGroupCatalog(self):
     self.ltgCatalogName = "%s - Catalog" % self.layer.name()
-    self.changedNameGroup.emit( self.layer.id(), self.ltgCatalogName )
     self.ltgCatalog = self.ltgRoot.findGroup( self.ltgCatalogName  )
     if self.ltgCatalog is None:
       self.ltgCatalog = self.ltgRoot.addGroup( self.ltgCatalogName )
 
   @pyqtSlot( bool )
   def finishedPG(self, isKilled ):
-    
-    def setCurrentImage():
-      sourceImage = self.dicImages[ self.featureImage.image() ]['source']
-      ltlsImage = filter( lambda item: item.layer().source() == sourceImage, self.ltgCatalog.findLayers()  )
-      if len( ltlsImage ) > 0:
-        ltl = ltlsImage[0]
-        layer = ltl.layer()
-        self.ltv.setCurrentLayer( layer )
-        if not self.currentStatusLC is None and self.currentStatusLC['source'] == layer.source():
-          ltl.setVisible( self.currentStatusLC['visible'] ) 
-    
-    self.ltv.activated.connect( self.activated )
-    QApplication.restoreOverrideCursor()
-    #
-    if not isKilled and not self.featureImage.image() is None:
-      setCurrentImage()
-    #
     self.thread.quit()
-    #
-    if isKilled:
-      self._populateGroupCatalog()
+    self.changedIconRun.emit( self.layer.id(), self.layer.selectedFeatureCount() > 0 )
+    if self.hasCanceled:
+      self.changedTotal.emit( self.layer.id(), '0')
 
   @pyqtSlot( str )
   def messageStatusPG(self, msg):
@@ -642,65 +439,18 @@ class CatalogOTF(QObject):
   def messageErrorPG(self, msg):
     self.msgBar.pushMessage( NAME_PLUGIN, msg, QgsMessageBar.CRITICAL, 4 )
 
-  @pyqtSlot()
-  def extentsChanged(self):
-    if self.layer is None:
-      msgtrans = QCoreApplication.translate("CatalogOTF", "Need define layer catalog")
-      self.msgBar.pushMessage( NAME_PLUGIN, msgtrans, QgsMessageBar.WARNING, 2 )
-      return
-    #
-    renderFlag = self.canvas.renderFlag()
-    if renderFlag:
-      self.canvas.setRenderFlag( False )
-      self.canvas.stopRendering()
-    #
-    self._populateGroupCatalog()
-    #
-    if renderFlag:
-      self.canvas.setRenderFlag( True )
-      self.canvas.refresh()
-    #
-    if self.highlightImage:
-      self.featureImage.highlight( 3 )
-
-  @pyqtSlot( 'QModelIndex' )
-  def activated(self, index ):
-    if self.layer is None:
-      msgtrans = QCoreApplication.translate("CatalogOTF", "Need define layer catalog")
-      self.msgBar.pushMessage( NAME_PLUGIN, msgtrans, QgsMessageBar.WARNING, 2 )
-      return
-    #
-    layer = self.ltv.currentLayer()
-    #
-    if layer is None: # or not self.highlightImage and not self.zoomImage :
-      return
-    #
-    self.featureImage.clear()
-    #
-    if not self._setFeatureImage( layer ): 
-      return
-    #
-    if self.zoomImage:
-      ss = { 'signal': self.canvas.extentsChanged , 'slot': self.extentsChanged }
-      ss['signal'].disconnect( ss['slot'] )
-      self.featureImage.zoom()
-      ss['signal'].connect( ss['slot'] )
-      self._populateGroupCatalog()
-    #
-    if self.highlightImage:
-      self.featureImage.highlight( 3 )
-
   @pyqtSlot( 'QModelIndex', 'QModelIndex' )
   def dataChanged(self, idTL, idBR):
     if idTL != idBR:
       return
-    #
-    if self.ltgCatalog == self.model.index2node( idBR ):
+
+    if not self.ltgCatalog is None and self.ltgCatalog == self.model.index2node( idBR ):
       name = self.ltgCatalog.name()
       if self.ltgCatalogName != name:
-        self.changedNameGroup.emit( self.layer.id(), name )
         self.ltgCatalogName = name
-    elif self.ltgRoot.findLayer( self.layer.id() ) == self.model.index2node( idBR ):
+        return
+
+    if not self.layer is None and self.ltgRoot.findLayer( self.layer.id() ) == self.model.index2node( idBR ):
       name = self.layer.name()
       if self.layerName != name:
         self.changedNameLayer.emit( self.layer.id(), name )
@@ -713,25 +463,6 @@ class CatalogOTF(QObject):
     if self.layer.id() in layerIds:
       self.removedLayer.emit( self.layer.id() )
       self.removeLayerCatalog()
-
-  @pyqtSlot( 'QgsLayerTreeNode', int, int )
-  def willRemoveChildren(self, node, indexFrom, indexTo):
-    if node == self.ltgCatalog: 
-      return
-    #
-    removeNode = node.children()[ indexFrom ]
-    if removeNode == self.ltgCatalog:
-      self.enable( False )
-      self.removedGroup.emit( self.layer.id() )
-
-  @pyqtSlot()
-  def destinationCrsChanged_MapUnitsChanged(self):
-    self.extentsChanged()
-
-  @pyqtSlot()
-  def selectionChanged(self):
-    if self.selectedImage:
-      self._populateGroupCatalog()
 
   @staticmethod
   def getNameFieldsCatalog(layer):
@@ -805,172 +536,90 @@ class CatalogOTF(QObject):
     return { 'nameSource': fieldSource, 'nameDate': fieldDate } if isOk else None 
 
   def setLayerCatalog(self, layer, nameFiedlsCatalog):
-
-    def setDicImages():
-      fr = QgsFeatureRequest()
-      fieldsRequest = [ self.nameFieldSource, self.nameFieldDate ]
-      fr.setSubsetOfAttributes( fieldsRequest, layer.dataProvider().fields() )
-      fr.setFlags( QgsFeatureRequest.NoGeometry )
-      #
-      self.dicImages  = {}
-      it = self.layer.getFeatures( fr )
-      f = QgsFeature()
-      while it.nextFeature( f ):
-        key = basename( f[ self.nameFieldSource ] )
-        value = { 'source': f[ self.nameFieldSource ], 'date': f[ self.nameFieldDate ], 'id': f.id() }
-        self.dicImages [key] = value
-      it.close()
-
     self.layer = layer
     self.layerName = layer.name()
-    self.selectedImage = True if layer.selectedFeatureCount() > 0 else False 
-    self.featureImage = FeatureImage( layer, self.iface )
     self.nameFieldSource = nameFiedlsCatalog[ 'nameSource' ]
     self.nameFieldDate = nameFiedlsCatalog[ 'nameDate' ]
-    setDicImages()
     self.settedLayer.emit( self.layer )
 
   def removeLayerCatalog(self):
-    self.featureImage.clear()
-    self.dicImages.clear()
-    self.featureImage = self.dicImages = None 
-    #
     self.ltgRoot.removeChildNode( self.ltgCatalog )
     self.ltgCatalog = None
-    #
     self.layer = self.nameFieldSource = self.nameFieldDate =  None
-
-  def enable( self, on=True ):
-    if on:
-      self._setGroupCatalog()
-      self.ltgCatalogName = self.ltgCatalog.name()
-      self._connectCatalog( True )
-      self.extentsChanged()
-    else:
-      self._connectCatalog( False )
-    
-  def enableZoom(self, on=True):
-    self.zoomImage = on
-    if on and self._setFeatureImage( self.ltv.currentLayer() ): 
-      ss = { 'signal': self.canvas.extentsChanged , 'slot': self.extentsChanged }
-      ss['signal'].disconnect( ss['slot'] )
-      self.featureImage.zoom()
-      ss['signal'].connect( ss['slot'] )
-      self._populateGroupCatalog()
-
-  def enableHighlight(self, on=True):
-    self.highlightImage = on
-    if on and self._setFeatureImage( self.ltv.currentLayer() ):
-      self.featureImage.highlight( 3 )
-
-  def enableSelected(self, on=True):
-    self.selectedImage = on
 
 
 class TableCatalogOTF(QObject):
 
-  # signal that change checkBox of Layer, Select, Highlight, Zoom
-  checkedState = pyqtSignal( str, str, int )
+  runCatalog = pyqtSignal( str )
 
   def __init__(self):
+    def initGui():
+      self.tableWidget.setWindowTitle("Catalog OTF")
+      self.tableWidget.setSortingEnabled( False )
+      msgtrans = QCoreApplication.translate("CatalogOTF", "Layer,Total")
+      headers = msgtrans.split(',')
+      self.tableWidget.setColumnCount( len( headers ) )
+      self.tableWidget.setHorizontalHeaderLabels( headers )
+      self.tableWidget.resizeColumnsToContents()
+
     super( TableCatalogOTF, self ).__init__()
     self.tableWidget = QTableWidget()
-    self._init()
-
-  def _init(self):
-    self.tableWidget.setWindowTitle("Catalog OTF")
-    self.tableWidget.setSortingEnabled( False )
-    msgtrans = QCoreApplication.translate("CatalogOTF", "Layer,Group,Total,Selected,Highlight,Zoom")
-    headers = msgtrans.split(',')
-    self.tableWidget.setColumnCount( len( headers ) )
-    self.tableWidget.setHorizontalHeaderLabels( headers )
-    self.tableWidget.resizeColumnsToContents()
-    #
-    self.tableWidget.itemChanged.connect( self.itemChanged )
-
-  def _getLayerID(self, row ):
-    item = self.tableWidget.item( row, 0)
-    return item.data( Qt.UserRole )
+    initGui()
 
   def _getRowLayerID(self, layerID):
     for row in range( self.tableWidget.rowCount() ):
-      if layerID == self._getLayerID( row ):
+      if layerID == self.tableWidget.cellWidget( row, 0 ).objectName():
         return row
     return -1
-
-  def setFlagsByCheck(self, row, check, columns):
-    ff = ( lambda f: f | Qt.ItemIsEnabled ) if check == Qt.Checked else ( lambda f: f ^ Qt.ItemIsEnabled )
-    for column in columns:
-      item = self.tableWidget.item( row, column)
-      item.setFlags( ff( item.flags() ) )
 
   def _changedText(self, layerID, name, column):
     row = self._getRowLayerID( layerID )
     if row != -1:
-      ss = { 'signal': self.tableWidget.itemChanged , 'slot': self.itemChanged   }
-      ss['signal'].disconnect( ss['slot'] )
-      #
-      item = self.tableWidget.item( row, column )
-      item.setText( name )
-      item.setToolTip( name )
-      #
-      ss['signal'].connect( ss['slot'] )
+      wgt = self.tableWidget.cellWidget( row, column ) if column == 0 else self.tableWidget.item( row, column )
+      wgt.setText( name )
+      wgt.setToolTip( name )
+      self.tableWidget.resizeColumnsToContents()
 
-  @pyqtSlot( 'QTableWidgetItem' )
-  def itemChanged( self, item ):
-    checkBoxs = {
-           0: 'checkBoxLayer',
-           3: 'checkBoxSelect',
-           4: 'checkBoxHighlight',
-           5: 'checkBoxZoom'
-         }
-    column = item.column()
-    if not column in ( checkBoxs.keys() ):
-      return
-    #
-    row = item.row()
-    check = item.checkState()
-    self.checkedState.emit( self._getLayerID( row ), checkBoxs[ column ], check )
+  @pyqtSlot()
+  def _onRunCatalog(self):
+    btn = self.sender()
+    icon = QIcon( joinPath( dirname(__file__), 'cancel_red.svg' ) )
+    btn.setIcon( icon )
+    layerID = btn.objectName() 
+    self.runCatalog.emit( layerID )
+
+  @pyqtSlot()  
+  def _onSelectionChanged(self):
+    layer = self.sender()
+    row = self._getRowLayerID( layer.id() )
+    if row != -1:
+      wgt = self.tableWidget.cellWidget( row, 0 )
+      nameIcon = 'check_green.svg' if layer.selectedFeatureCount() == 0 else 'check_yellow.svg'
+      icon = QIcon( joinPath( dirname(__file__), nameIcon ) )
+      wgt.setIcon( icon )
 
   @pyqtSlot( "QgsVectorLayer")
   def insertRow(self, layer):
-    ss = { 'signal': self.tableWidget.itemChanged , 'slot': self.itemChanged   }
-    ss['signal'].disconnect( ss['slot'] )
-    #
     row = self.tableWidget.rowCount()
     self.tableWidget.insertRow( row )
-    #
-    # "Layer", "Group", "Total", "Select", "Highlight", "Zoom" 
-    #
-    lenTexts = 3
-    #
-    ( layerID, layerName ) = ( layer.id(), layer.name() )
-    #
+
     column = 0 # Layer
-    item = QTableWidgetItem( layerName )
-    item.setFlags( Qt.ItemIsSelectable | Qt.ItemIsEnabled | Qt.ItemIsUserCheckable )
-    item.setCheckState(Qt.Unchecked)
-    item.setData( Qt.UserRole, layerID )
-    item.setToolTip( layerName )
+    layerName = layer.name()
+    nameIcon = 'check_green.svg' if layer.selectedFeatureCount() == 0 else 'check_yellow.svg'
+    icon = QIcon( joinPath( dirname(__file__), nameIcon ) )
+    btn = QPushButton( icon, layerName, self.tableWidget )
+    btn.setObjectName( layer.id() )
+    btn.setToolTip( layerName )
+    btn.clicked.connect( self._onRunCatalog )
+    layer.selectionChanged.connect( self._onSelectionChanged )
+    self.tableWidget.setCellWidget( row, column, btn )
+
+    column = 1 # Total
+    item = QTableWidgetItem("None")
+    item.setFlags( Qt.ItemIsSelectable | Qt.ItemIsEnabled )
     self.tableWidget.setItem( row, column, item )
-    #
-    for column in range( 1, lenTexts ):
-      item = QTableWidgetItem("None")
-      item.setFlags( Qt.ItemIsSelectable | Qt.ItemIsEnabled )
-      self.tableWidget.setItem( row, column, item )
-    # Check's
-    for column in range( lenTexts, self.tableWidget.columnCount() ):
-      item = QTableWidgetItem()
-      item.setFlags( Qt.ItemIsSelectable | Qt.ItemIsUserCheckable | Qt.ItemIsEnabled  )
-      item.setCheckState(Qt.Unchecked)
-      self.tableWidget.setItem( row, column, item )
-    #
-    if layer.selectedFeatureCount() > 0: # "Select"
-      column = lenTexts
-      self.tableWidget.item( row, column ).setCheckState( Qt.Checked )
-    #
+
     self.tableWidget.resizeColumnsToContents()
-    ss['signal'].connect( ss['slot'] )
 
   @pyqtSlot( str )
   def removeRow(self, layerID):
@@ -981,31 +630,27 @@ class TableCatalogOTF(QObject):
   @pyqtSlot( str, str )
   def changedNameLayer(self, layerID, name):
     self._changedText( layerID, name, 0 )
-    self.tableWidget.resizeColumnsToContents()
-    
-  @pyqtSlot( str, str )
-  def changedNameGroup(self, layerID, name=None):
-
-    def uncheckedLayer():
-      row = self._getRowLayerID( layerID )
-      if row != -1:
-        ss = { 'signal': self.tableWidget.itemChanged , 'slot': self.itemChanged   }
-        ss['signal'].disconnect( ss['slot'] )
-        self.tableWidget.item( row, 0 ).setCheckState( Qt.Unchecked )
-        self.setFlagsByCheck( row, Qt.Unchecked, range(3, 6, 1) )
-        ss['signal'].connect( ss['slot'] )
-    #
-    if name is None:
-      name = "None"
-      uncheckedLayer()
-      self._changedText( layerID, name, 2 )
-    self._changedText( layerID, name, 1 )
-    self.tableWidget.resizeColumnsToContents()
 
   @pyqtSlot( str, str )
   def changedTotal(self, layerID, value):
-    self._changedText( layerID, value, 2 )
-    self.tableWidget.resizeColumnsToContents()
+    self._changedText( layerID, value, 1 )
+
+  @pyqtSlot( str, bool )
+  def changedIconRun(self, layerID, selected):
+    row = self._getRowLayerID( layerID )
+    if row != -1:
+      btn = self.tableWidget.cellWidget( row, 0 )
+      nameIcon = 'check_green.svg' if not selected else 'check_yellow.svg'
+      icon = QIcon( joinPath( dirname(__file__), nameIcon ) )
+      btn.setIcon( icon )
+      btn.setEnabled( True )
+
+  @pyqtSlot( str )
+  def killed(self, layerID):
+    row = self._getRowLayerID( layerID )
+    if row != -1:
+      btn = self.tableWidget.cellWidget( row, 0 )
+      btn.setEnabled( False )
 
   def widget(self):
     return self.tableWidget
@@ -1040,22 +685,16 @@ class DockWidgetCatalogOTF(QDockWidget):
     #
     self.iface = iface
     self.cotf = {} 
-    self.tbl_cotf = TableCatalogOTF( )
-    self.tbl_cotf.checkedState.connect( self.checkedState )
+    self.tbl_cotf = TableCatalogOTF()
+    self.tbl_cotf.runCatalog.connect( self._onRunCatalog )
     #
     setupUi()
 
-  @pyqtSlot( str, str, int )
-  def checkedState(self, layerID, nameCheckBox, checkState):
-    checkBoxs = {
-          'checkBoxLayer': self.cotf[ layerID ].enable,
-          'checkBoxSelect': self.cotf[ layerID ].enableSelected,
-          'checkBoxHighlight': self.cotf[ layerID ].enableHighlight,
-          'checkBoxZoom': self.cotf[ layerID ].enableZoom
-    }
-    on = True if checkState == Qt.Checked else False
-    checkBoxs[ nameCheckBox ]( on )
-
+  @pyqtSlot( str )
+  def _onRunCatalog(self, layerID):
+    if layerID in self.cotf.keys(): # Maybe Never happend
+      self.cotf[ layerID ].run()
+  
   @pyqtSlot( str )
   def removeLayer(self, layerID):
     del self.cotf[ layerID ]
@@ -1099,7 +738,7 @@ class DockWidgetCatalogOTF(QDockWidget):
         layerID = item.id()
         self.cotf[ layerID ] = CatalogOTF( self.iface, self.tbl_cotf )
         self.cotf[ layerID ].removedLayer.connect( self.removeLayer )
-        self.cotf[ layerID ].setLayerCatalog( item, nameFiedlsCatalog )
+        self.cotf[ layerID ].setLayerCatalog( item, nameFiedlsCatalog ) # Insert table
         addLegendImages( item )
         find = True
     #
