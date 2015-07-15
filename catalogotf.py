@@ -82,38 +82,43 @@ class WorkerPopulateGroup(QObject):
   def run(self):
 
     def getImagesByCanvas():
+      def getSourceDate(feat):
+        return { 'source': feat[ self.nameFieldSource ], 'date': feat[ self.nameFieldDate ] } 
+
+      def getSource(feat):
+        return { 'source': feat[ self.nameFieldSource ] }
+
       images = []
-      #
+
       selectedImage = self.layer.selectedFeatureCount() > 0
       rectLayer = self.layer.extent() if not selectedImage else self.layer.boundingBoxOfSelected()
       crsLayer = self.layer.crs()
-      #
+
       crsCanvas = self.canvas.mapSettings().destinationCrs()
       ct = QgsCoordinateTransform( crsCanvas, crsLayer )
       rectCanvas = self.canvas.extent() if crsCanvas == crsLayer else ct.transform( self.canvas.extent() )
-      #
+
       if not rectLayer.intersects( rectCanvas ):
         return [] 
-      #
+
       fr = QgsFeatureRequest()
       if selectedImage:
         fr.setFilterFids( self.layer.selectedFeaturesIds() )
       index = QgsSpatialIndex( self.layer.getFeatures( fr ) )
       fids = index.intersects( rectCanvas )
-      #
+
       del fr
       del index
-      #
+
       fr = QgsFeatureRequest()
       fr.setFilterFids ( fids )
       it = self.layer.getFeatures( fr ) 
       f = QgsFeature()
+      getF = getSourceDate if not self.nameFieldDate  is None else  getSource
       while it.nextFeature( f ):
         if f.geometry().intersects( rectCanvas ):
-          source = f[ self.nameFieldSource ]
-          vdate =  f[ self.nameFieldDate ]
-          images.append( { 'source': source, 'date': vdate } )
-      #
+          images.append( getF( f ) )
+
       del fids[:]
       #
       return images
@@ -128,18 +133,18 @@ class WorkerPopulateGroup(QObject):
             response = urllib2.urlopen( url_tms )
             html = response.read()
             response.close()
-            #
+
             fw = open( localName, 'w' )
             fw.write( html )
             fw.close()
 
           localName = "%s/%s" % ( self.TEMP_DIR, basename( url_tms ) )
           fileInfo = QFileInfo( localName )
-          #
+
           if not fileInfo.exists():
             createLocalFile()
             fileInfo = QFileInfo( localName )
-          #
+
           return fileInfo
 
         source = image[ 'source' ]
@@ -147,10 +152,47 @@ class WorkerPopulateGroup(QObject):
         lenSource = len( source)
         isUrl = isUrl and source.rfind( 'xml', lenSource - len( 'xml' ) ) == lenSource - len( 'xml' )   
         fi = prepareFileTMS( source ) if isUrl else QFileInfo( source )
-        #
+
         return { 'fileinfo': fi, 'date': image[ 'date' ] }
-      #
-      
+
+      def getFileInfo( image ):
+
+        def prepareFileTMS( url_tms ):
+
+          def createLocalFile():
+            response = urllib2.urlopen( url_tms )
+            html = response.read()
+            response.close()
+
+            fw = open( localName, 'w' )
+            fw.write( html )
+            fw.close()
+
+          localName = "%s/%s" % ( self.TEMP_DIR, basename( url_tms ) )
+          fileInfo = QFileInfo( localName )
+
+          if not fileInfo.exists():
+            createLocalFile()
+            fileInfo = QFileInfo( localName )
+
+          return fileInfo
+
+        source = image[ 'source' ]
+        isUrl = source.find('http://') == 0 or source.find('https://') == 0
+        lenSource = len( source)
+        isUrl = isUrl and source.rfind( 'xml', lenSource - len( 'xml' ) ) == lenSource - len( 'xml' )   
+        fi = prepareFileTMS( source ) if isUrl else QFileInfo( source )
+
+        return { 'fileinfo': fi  }
+
+      def getNameLayerDate(id):
+        vdate = l_fileinfo[ id ]['date'].toString( "yyyy-MM-dd" )
+        name = l_layer[ id ].name()
+        return "%s (%s)" % ( vdate, name )
+
+      def getNameLayer(id):
+        return l_layer[ id ].name()
+
       def setTransparence():
 
         def getListTTVP():
@@ -165,7 +207,7 @@ class WorkerPopulateGroup(QObject):
         for id in range( 0, len( l_raster ) ):
           if self.isKilled:
             return
-          fileName = l_fileinfo_date[ id ]['fileinfo'].fileName()
+          fileName = l_fileinfo[ id ]['fileinfo'].fileName()
           idExt = fileName.rfind( extension )
           if idExt == -1 or len( fileName ) != ( idExt + len ( extension ) ):
             l_raster[ id ].renderer().rasterTransparency().setTransparentThreeValuePixelList( l_ttvp )
@@ -174,21 +216,26 @@ class WorkerPopulateGroup(QObject):
         for item in lsts:
           del item[:]
       
-      # Sorted images 
-      l_image_date_sorted = sorted( images, key = lambda item: item['date'], reverse = True )
-      l_fileinfo_date = map( getFileInfoDate, l_image_date_sorted )
-      del l_image_date_sorted[:]
+      # Sorted images
+      if not self.nameFieldDate  is None:
+        l_image_sorted = sorted( images, key = lambda item: item['date'], reverse = True )
+        l_fileinfo = map( getFileInfoDate, l_image_sorted )
+      else:
+        l_image_sorted = sorted( images, key = lambda item: item['source'], reverse = True )
+        l_fileinfo = map( getFileInfo, l_image_sorted )
+      
+      del l_image_sorted[:]
 
       totalRaster = -1 # isKilled
       if self.isKilled:
-        del l_fileinfo_date[:]
+        del l_fileinfo[:]
         return totalRaster
 
       l_raster = map( lambda item: 
                         QgsRasterLayer( item['fileinfo'].filePath(), item['fileinfo'].baseName() ),
-                        l_fileinfo_date )
+                        l_fileinfo )
 
-      # l_fileinfo_date[ {'fileinfo', 'date'} ], l_raster[ QgsRasterLayer ]
+      # l_fileinfo, l_raster
 
       # Invalid raster
       l_id_error = []
@@ -198,16 +245,16 @@ class WorkerPopulateGroup(QObject):
         if not l_raster[ id ].isValid():
           l_id_error.append( id )
       if self.isKilled:
-        cleanLists( [ l_fileinfo_date, l_raster, l_id_error ] )
+        cleanLists( [ l_fileinfo, l_raster, l_id_error ] )
         return totalRaster
 
-      # l_fileinfo_date, l_raster, l_id_error[ id ]
+      # l_fileinfo, l_raster, l_id_error
 
       l_error = None
       l_id_error.reverse()
       if len( l_id_error ) > 0:
         l_error = map( lambda item: item.source(), l_raster )
-        l_removes = [ l_fileinfo_date, l_raster ]
+        l_removes = [ l_fileinfo, l_raster ]
         for id in l_id_error:
           if self.isKilled:
             break
@@ -216,11 +263,11 @@ class WorkerPopulateGroup(QObject):
         del l_id_error[:]
         del l_removes[:]
         if self.isKilled:
-          cleanLists( [ l_fileinfo_date, l_raster, l_error ] )
+          cleanLists( [ l_fileinfo, l_raster, l_error ] )
           return totalRaster
 
       del l_id_error[:]
-      # l_fileinfo_date, l_raster, l_error
+      # l_fileinfo, l_raster, l_error
 
       totalRaster = len( l_raster ) 
       # Add raster
@@ -232,22 +279,20 @@ class WorkerPopulateGroup(QObject):
             break
           l_layer.append( QgsMapLayerRegistry.instance().addMapLayer( item, addToLegend=False ) )
         if self.isKilled:
-          cleanLists( [ l_fileinfo_date, l_error, l_layer ] )
+          cleanLists( [ l_fileinfo, l_error, l_layer ] )
           return -1
 
-        # l_fileinfo_date, l_error, l_layer
-
+        # l_fileinfo, l_error, l_layer
+        getN = getNameLayerDate if not self.nameFieldDate  is None else getNameLayer
         for id in range( 0, len( l_layer ) ):
           if self.isKilled:
             break
           ltl = self.ltgCatalog.addLayer( l_layer[ id ] )
           ltl.setVisible( Qt.Unchecked )
-          vdate = l_fileinfo_date[ id ]['date'].toString( "yyyy-MM-dd" )
-          name = l_layer[ id ].name()
-          name = "%s (%s)" % ( vdate, name )
+          name = getN( id )
           ltl.setLayerName( name )
           self.addLegendLayer( l_layer[ id ] )
-        cleanLists( [ l_fileinfo_date, l_layer ] )
+        cleanLists( [ l_fileinfo, l_layer ] )
         if self.isKilled:
           return -1
 
@@ -497,8 +542,10 @@ class CatalogOTF(QObject):
       value = feature.attributes()[ idField ]
       if value is None or type(value) == QPyNullVariant:
         return False
-      #
+
       isUrl = value.find('http://') == 0 or value.find('https://') == 0
+      lenSource = len( value )
+      isUrl = isUrl and value.rfind( 'xml', lenSource - len( 'xml' ) ) == lenSource - len( 'xml' )   
       if isUrl:
         return asValidUrl( value )
       #
@@ -529,7 +576,7 @@ class CatalogOTF(QObject):
       elif item.type() == QVariant.Date:
         if fieldDate is None and hasDate( firstFeature, layer.fieldNameIndex( item.name() ) ):
           fieldDate = item.name()
-      if not fieldSource is None and not fieldDate is None :
+      if not fieldSource is None:
         isOk = True
         break
     #
