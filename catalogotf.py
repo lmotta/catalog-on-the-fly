@@ -561,11 +561,11 @@ class CatalogOTF(QObject):
 
     if layer is None or layer.type() != QgsMapLayer.VectorLayer or layer.geometryType() != QGis.Polygon:
       return None
-    #
+
     firstFeature = getFirstFeature()
     if firstFeature is None:
       return None
-    #
+
     fieldSource = None
     fieldDate = None
     isOk = False
@@ -576,10 +576,9 @@ class CatalogOTF(QObject):
       elif item.type() == QVariant.Date:
         if fieldDate is None and hasDate( firstFeature, layer.fieldNameIndex( item.name() ) ):
           fieldDate = item.name()
-      if not fieldSource is None:
-        isOk = True
-        break
-    #
+    if not fieldSource is None:
+      isOk = True
+
     return { 'nameSource': fieldSource, 'nameDate': fieldDate } if isOk else None 
 
   def setLayerCatalog(self, layer, nameFiedlsCatalog):
