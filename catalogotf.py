@@ -437,7 +437,7 @@ class CatalogOTF(QObject):
 
   @pyqtSlot( str )
   def messageErrorPG(self, msg):
-    self.msgBar.pushMessage( NAME_PLUGIN, msg, QgsMessageBar.CRITICAL, 4 )
+    self.msgBar.pushMessage( NAME_PLUGIN, msg, QgsMessageBar.CRITICAL, 8 )
 
   @pyqtSlot( 'QModelIndex', 'QModelIndex' )
   def dataChanged(self, idTL, idBR):
@@ -706,7 +706,7 @@ class DockWidgetCatalogOTF(QDockWidget):
      ltgCatalog = QgsProject.instance().layerTreeRoot().findGroup( name  )
      if not ltgCatalog is None:
       for item in map( lambda item: item.layer(), ltgCatalog.findLayers() ):
-        self.cotf[ layerID ].addLegendLayer( item )
+        self.cotf[ layerID ].addLegendLayerWorker( item )
 
     def checkTempDir():
       tempDir = QDir( WorkerPopulateGroup.TEMP_DIR )
