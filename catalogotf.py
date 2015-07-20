@@ -41,7 +41,7 @@ from PyQt4.QtXml import QDomDocument
 import qgis
 from qgis.gui import ( QgsMessageBar ) 
 from qgis.core import (
-  QgsProject, QGis,
+  QgsProject, QGis, QgsMessageLog,
   QgsMapLayerRegistry, QgsMapLayer,
   QgsFeature, QgsFeatureRequest, QgsGeometry, QgsRectangle,  QgsSpatialIndex,
   QgsCoordinateTransform,
@@ -69,6 +69,7 @@ class WorkerPopulateGroup(QObject):
     self.killed = False
     #
     self.canvas = qgis.utils.iface.mapCanvas()
+    self.logMessage = QgsMessageLog.instance().logMessage
     self.addLegendLayer = addLegendLayer
     self.nameFieldSource = self.layer = self.ltgCatalog = None
 
@@ -112,6 +113,7 @@ class WorkerPopulateGroup(QObject):
 
       fr = QgsFeatureRequest()
       fr.setFilterFids ( fids )
+      del fids[:]
       it = self.layer.getFeatures( fr ) 
       f = QgsFeature()
       getF = getSourceDate if not self.nameFieldDate  is None else  getSource
@@ -119,11 +121,15 @@ class WorkerPopulateGroup(QObject):
         if f.geometry().intersects( rectCanvas ):
           images.append( getF( f ) )
 
-      del fids[:]
-      #
       return images
 
     def addImages():
+
+      def finished(msg=None):
+        if not msg is None:
+          self.messageStatus.emit( msg )
+        del images[:]
+        self.finished.emit( self.isKilled )
 
       def getFileInfoDate( image ):
 
@@ -205,8 +211,6 @@ class WorkerPopulateGroup(QObject):
         l_ttvp = getListTTVP()
         #
         for id in range( 0, len( l_raster ) ):
-          if self.isKilled:
-            return
           fileName = l_fileinfo[ id ]['fileinfo'].fileName()
           idExt = fileName.rfind( extension )
           if idExt == -1 or len( fileName ) != ( idExt + len ( extension ) ):
@@ -216,6 +220,9 @@ class WorkerPopulateGroup(QObject):
         for item in lsts:
           del item[:]
       
+      
+      self.logMessage( "DEBUG Init ", "Catalog OTF", QgsMessageLog.INFO)
+      
       # Sorted images
       if not self.nameFieldDate  is None:
         l_image_sorted = sorted( images, key = lambda item: item['date'], reverse = True )
@@ -223,31 +230,26 @@ class WorkerPopulateGroup(QObject):
       else:
         l_image_sorted = sorted( images, key = lambda item: item['source'], reverse = True )
         l_fileinfo = map( getFileInfo, l_image_sorted )
-      
       del l_image_sorted[:]
 
-      totalRaster = -1 # isKilled
-      if self.isKilled:
-        del l_fileinfo[:]
-        return totalRaster
-
-      l_raster = map( lambda item: 
-                        QgsRasterLayer( item['fileinfo'].filePath(), item['fileinfo'].baseName() ),
-                        l_fileinfo )
-
+      l_raster = []
+      for item in l_fileinfo:
+        l_raster.append( QgsRasterLayer( item['fileinfo'].filePath(), item['fileinfo'].baseName() ) )
+        if self.isKilled:
+          del l_fileinfo[:]
+          del l_raster[:]
+          finished()
+          self.logMessage( "DEBUG - Cancel 1", "Catalog OTF", QgsMessageLog.INFO)
+          return
       # l_fileinfo, l_raster
+
+      self.logMessage( "DEBUG Finish append Raster ", "Catalog OTF", QgsMessageLog.INFO)
 
       # Invalid raster
       l_id_error = []
       for id in range( 0, len( l_raster ) ):
-        if self.isKilled:
-          break
         if not l_raster[ id ].isValid():
           l_id_error.append( id )
-      if self.isKilled:
-        cleanLists( [ l_fileinfo, l_raster, l_id_error ] )
-        return totalRaster
-
       # l_fileinfo, l_raster, l_id_error
 
       l_error = None
@@ -256,15 +258,10 @@ class WorkerPopulateGroup(QObject):
         l_error = map( lambda item: item.source(), l_raster )
         l_removes = [ l_fileinfo, l_raster ]
         for id in l_id_error:
-          if self.isKilled:
-            break
           for item in l_removes:
             item.remove( item[ id ] )
         del l_id_error[:]
         del l_removes[:]
-        if self.isKilled:
-          cleanLists( [ l_fileinfo, l_raster, l_error ] )
-          return totalRaster
 
       del l_id_error[:]
       # l_fileinfo, l_raster, l_error
@@ -280,40 +277,38 @@ class WorkerPopulateGroup(QObject):
           l_layer.append( QgsMapLayerRegistry.instance().addMapLayer( item, addToLegend=False ) )
         if self.isKilled:
           cleanLists( [ l_fileinfo, l_error, l_layer ] )
-          return -1
+          finished()
+          self.logMessage( "DEBUG 2 Cancel", "Catalog OTF", QgsMessageLog.INFO)
+          return
+
+        self.logMessage( "DEBUG Finish register ", "Catalog OTF", QgsMessageLog.INFO)
 
         # l_fileinfo, l_error, l_layer
         getN = getNameLayerDate if not self.nameFieldDate  is None else getNameLayer
         for id in range( 0, len( l_layer ) ):
-          if self.isKilled:
-            break
           ltl = self.ltgCatalog.addLayer( l_layer[ id ] )
           ltl.setVisible( Qt.Unchecked )
           name = getN( id )
           ltl.setLayerName( name )
           self.addLegendLayer( l_layer[ id ] )
         cleanLists( [ l_fileinfo, l_layer ] )
-        if self.isKilled:
-          return -1
 
       # Message Error
       if not l_error is None:
-        msgtrans = QCoreApplication.translate("CatalogOTF", "Images invalid:\n%s")
-        self.messageError.emit( msgtrans % "\n" .join( l_error ) )
+        msgtrans = QCoreApplication.translate("CatalogOTF", "Images invalids: %d. See log message" % len( l_error ) )
+        for item in l_error:
+          msg = "Invalid image: %s" % item
+          self.logMessage( msg, "Catalog OTF", QgsMessageLog.CRITICAL )
+        self.messageError.emit( msgtrans )
         del l_error[:]
 
-      return totalRaster
+      finished( str( totalRaster ) )
 
     self.isKilled = False
     images = getImagesByCanvas()
-    msgtrans = QCoreApplication.translate("CatalogOTF", "Processing %d")
-    self.messageStatus.emit( msgtrans %  len( images ) )
-    totalRaster = addImages()
-    msg = "" if totalRaster == -1 else str( totalRaster ) 
-    self.messageStatus.emit( msg )
-
-    del images[:]
-    self.finished.emit( self.isKilled )
+    msgtrans = QCoreApplication.translate("CatalogOTF", "Processing %d" %  len( images) )
+    self.messageStatus.emit( msgtrans )
+    addImages()
 
   def kill(self):
     self.isKilled = True
@@ -346,8 +341,8 @@ class CatalogOTF(QObject):
     self.model = self.ltv.layerTreeModel()
     self.ltgRoot = QgsProject.instance().layerTreeRoot()
     self.msgBar = iface.messageBar()
-    self.legendTMS = LegendTMS( 'Catalog OTF')
-    self.legendRaster = LegendRaster( 'Catalog OTF')
+    self.legendTMS = LegendTMS( 'Catalog OTF' )
+    self.legendRaster = LegendRaster( 'Catalog OTF' )
 
     self._initThread()
 
@@ -356,8 +351,7 @@ class CatalogOTF(QObject):
     QgsMapLayerRegistry.instance().layersWillBeRemoved.connect( self.layersWillBeRemoved ) # Catalog layer removed
 
     self.layer = self.layerName = self.nameFieldSource = self.nameFieldDate = None
-    self.ltgCatalog = self.ltgCatalogName = self.hasCanceled = None
-    self.currentStatusLC = None
+    self.ltgCatalog = self.ltgCatalogName = self.visibleSourceLayers = self.hasCanceled = None
 
   def __del__(self):
     self._finishThread()
@@ -373,6 +367,8 @@ class CatalogOTF(QObject):
     self._connectWorker()
 
   def _finishThread(self):
+#     if self.thread.isRunning():
+#       self.worker.kill()
     self._connectWorker( False )
     self.worker.deleteLater()
     self.thread.wait()
@@ -437,16 +433,11 @@ class CatalogOTF(QObject):
 
   def _populateGroupCatalog(self):
 
-    def getCurrentStatusLayerCatalog():
-      node = self.ltv.currentNode()
-      if node is None or not node.nodeType() == QgsLayerTreeNode.NodeLayer:
-        return None
-      #
-      ltlCurrent = self.ltgCatalog.findLayer( node.layerId() )
-      if ltlCurrent is None:
-        return None
-      #
-      return { 'source': node.layer().source(), 'visible': node.isVisible() }
+    def getSourceVisibleLayers():
+      def hasVisibleRaster( ltl ):
+        return ltl.isVisible() == Qt.Checked and ltl.layer().type() == QgsMapLayer.RasterLayer
+      l_ltlVisible = filter( lambda item: hasVisibleRaster( item ), self.ltgCatalog.findLayers() )
+      return map( lambda item: item.layer().source(),  l_ltlVisible )
 
     def runWorker():
       data = {}
@@ -458,9 +449,8 @@ class CatalogOTF(QObject):
       self.thread.start()
       #self.worker.run() # DEBUG
 
-    self.currentStatusLC = getCurrentStatusLayerCatalog()
+    self.visibleSourceLayers = getSourceVisibleLayers()
     self.ltgCatalog.removeAllChildren()
-    #
     runWorker() # See finishPG
 
   def _setGroupCatalog(self):
@@ -471,10 +461,20 @@ class CatalogOTF(QObject):
 
   @pyqtSlot( bool )
   def finishedPG(self, isKilled ):
+    def setSourceVisibleLayers():
+      l_ltlVisible = filter( lambda item: item.layer().source() in self.visibleSourceLayers, self.ltgCatalog.findLayers() )
+      map( lambda item: item.setVisible( Qt.Checked ),  l_ltlVisible )
+
     self.thread.quit()
-    self.changedIconRun.emit( self.layer.id(), self.layer.selectedFeatureCount() > 0 )
-    if self.hasCanceled:
-      self.changedTotal.emit( self.layer.id(), '0')
+    
+    if not self.layer is None:
+      self.changedIconRun.emit( self.layer.id(), self.layer.selectedFeatureCount() > 0 )
+      if self.hasCanceled:
+        self.changedTotal.emit( self.layer.id(), '0')
+      else:
+        setSourceVisibleLayers()
+
+    del self.visibleSourceLayers[:]
 
   @pyqtSlot( str )
   def messageStatusPG(self, msg):
@@ -743,7 +743,7 @@ class DockWidgetCatalogOTF(QDockWidget):
   
   @pyqtSlot( str )
   def removeLayer(self, layerID):
-    del self.cotf[ layerID ]
+    self.cotf[ layerID ].worker.kill()
 
   @pyqtSlot()
   def findCatalogs(self):

@@ -147,10 +147,9 @@ class LegendTMS(LegendRaster):
 
       return targetWindow
 
+    crsCanvas = canvas.mapSettings().destinationCrs()
+    crsLayer = layer.crs()
+    ctCanvas = QgsCoordinateTransform( crsLayer, crsCanvas )
     tw = getTargetWindows()
     rect =  QgsRectangle( tw['ulX'], tw['lrY'], tw['lrX'], tw['ulY'] )
-    cr3857 = QgsCoordinateReferenceSystem( 3857, QgsCoordinateReferenceSystem.EpsgCrsId )
-    crsCanvas = canvas.mapSettings().destinationCrs()
-    ctCanvas = QgsCoordinateTransform( cr3857, crsCanvas )
-
     return ctCanvas.transform( rect )

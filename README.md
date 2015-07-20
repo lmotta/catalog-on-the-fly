@@ -12,6 +12,10 @@ Automatically adds  images that are in the catalog layer that intersect with the
 Luiz Motta
 
 ## Changelog
+- 2015-07-20
+Refactoring of cancel process when remove catalog layer
+- 2015-07-15
+Added context menu for local image, refactoring the table, change for button for search images
 - 2015-07-13
 Added context menu for TMS image
 - 2015-06-27

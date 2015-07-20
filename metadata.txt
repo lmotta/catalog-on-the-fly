@@ -5,21 +5,27 @@ about=This plugin work with catalog layer.
   Catalog layer need be the polygon layer and have two fields, source image(string) and date of image(date).
   This plugin is developed on the demand of IBAMA(Brazilian Institute of Environment and Renewable Natural Resources)
   http://www.ibama.gov.br
-  See video for use this plugin: https://youtu.be/2S3RlWr0uQg
-version=0.9
+  See the presentations:
+  - http://pt.slideshare.net/LuizMotta3/presentation-2015-0701ibamaplugins
+  - http://pt.slideshare.net/LuizMotta3/presentation-2015-0715ibamacatalootfinactions
+version=1.1
 qgisMinimumVersion=2.8
 category=Raster
 author=Luiz Motta
 email=motta.luiz@gmail.com
 
-changelog=0.9
-   Added context menu for TMS image
+changelog=1.1
+  - Refactoring of cancel process when remove catalog layer
+  1.0
+  - Added context menu for local image, refactoring the table, change for button for search images
+  0.9
+  - Added context menu for TMS image
   0.8
-   Use project file for save GDAL_WMS raster inside.
-   Update selected check behavior 
+  - Use project file for save GDAL_WMS raster inside.
+  - Update selected check behavior 
   0.7
-    - Correction for identify catalog from Postgres.
-    - Removed FID = 0 in getNameFieldsCatalog().getFirstFeature(), first FID for Postfgres is 1 and not 0
+  - Correction for identify catalog from Postgres.
+  - Removed FID = 0 in getNameFieldsCatalog().getFirstFeature(), first FID for Postfgres is 1 and not 0
   0.6
   - Create 'tmp' directory (case for Windows user)
     Refactoring the multiprocess (use of QThread) 
