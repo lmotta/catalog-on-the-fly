@@ -19,7 +19,7 @@ email                : motta.luiz@gmail.com
  ***************************************************************************/
 """
 
-from PyQt4.QtCore import ( QObject, QTimer, QFile, QIODevice, pyqtSlot )
+from PyQt4.QtCore import ( QObject, QCoreApplication, QTimer, QFile, QIODevice, pyqtSlot )
 from PyQt4.QtGui  import ( QAction, QColor )
 from PyQt4.QtXml import QDomDocument
 
@@ -33,13 +33,13 @@ class LegendRaster(object):
     def initLegendLayer():
       self.legendLayer = [
         {
-          'menu': u"Highlight",
+          'menu': QCoreApplication.translate( "CatalogOTF", "Highlight" ),
           'id': "idHighlight",
           'slot': self.highlight,
           'action': None
         },
         {
-          'menu': u"Zoom to",
+          'menu': QCoreApplication.translate( "CatalogOTF", "Zoom to" ),
           'id': "idZoom",
           'slot': self.zoom,
           'action': None

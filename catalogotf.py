@@ -220,9 +220,6 @@ class WorkerPopulateGroup(QObject):
         for item in lsts:
           del item[:]
       
-      
-      self.logMessage( "DEBUG Init ", "Catalog OTF", QgsMessageLog.INFO)
-      
       # Sorted images
       if not self.nameFieldDate  is None:
         l_image_sorted = sorted( images, key = lambda item: item['date'], reverse = True )
@@ -239,11 +236,8 @@ class WorkerPopulateGroup(QObject):
           del l_fileinfo[:]
           del l_raster[:]
           finished()
-          self.logMessage( "DEBUG - Cancel 1", "Catalog OTF", QgsMessageLog.INFO)
           return
       # l_fileinfo, l_raster
-
-      self.logMessage( "DEBUG Finish append Raster ", "Catalog OTF", QgsMessageLog.INFO)
 
       # Invalid raster
       l_id_error = []
@@ -278,10 +272,7 @@ class WorkerPopulateGroup(QObject):
         if self.isKilled:
           cleanLists( [ l_fileinfo, l_error, l_layer ] )
           finished()
-          self.logMessage( "DEBUG 2 Cancel", "Catalog OTF", QgsMessageLog.INFO)
           return
-
-        self.logMessage( "DEBUG Finish register ", "Catalog OTF", QgsMessageLog.INFO)
 
         # l_fileinfo, l_error, l_layer
         getN = getNameLayerDate if not self.nameFieldDate  is None else getNameLayer
@@ -295,19 +286,23 @@ class WorkerPopulateGroup(QObject):
 
       # Message Error
       if not l_error is None:
-        msgtrans = QCoreApplication.translate("CatalogOTF", "Images invalids: %d. See log message" % len( l_error ) )
         for item in l_error:
-          msg = "Invalid image: %s" % item
+          msgtrans = QCoreApplication.translate( "CatalogOTF", "Invalid image: %s" )
+          msg = msgtrans % item
           self.logMessage( msg, "Catalog OTF", QgsMessageLog.CRITICAL )
-        self.messageError.emit( msgtrans )
+
+        msgtrans = QCoreApplication.translate( "CatalogOTF", "Images invalids: %d. See log message" )
+        msg = msgtrans % len( l_error ) 
+        self.messageError.emit( msg )
         del l_error[:]
 
       finished( str( totalRaster ) )
 
     self.isKilled = False
     images = getImagesByCanvas()
-    msgtrans = QCoreApplication.translate("CatalogOTF", "Processing %d" %  len( images) )
-    self.messageStatus.emit( msgtrans )
+    msgtrans = QCoreApplication.translate( "CatalogOTF", "Processing %d" )
+    msg = msgtrans % len( images)
+    self.messageStatus.emit( msg )
     addImages()
 
   def kill(self):
@@ -367,8 +362,6 @@ class CatalogOTF(QObject):
     self._connectWorker()
 
   def _finishThread(self):
-#     if self.thread.isRunning():
-#       self.worker.kill()
     self._connectWorker( False )
     self.worker.deleteLater()
     self.thread.wait()
@@ -405,9 +398,9 @@ class CatalogOTF(QObject):
     if self.thread.isRunning():
       self.worker.kill()
       self.hasCanceled = True
-      msgtrans = QCoreApplication.translate("CatalogOTF", "Canceled search for image from layer ")
-      msgtrans += self.layerName 
-      self.msgBar.pushMessage( NAME_PLUGIN, msgtrans, QgsMessageBar.WARNING, 2 )
+      msgtrans = QCoreApplication.translate("CatalogOTF", "Canceled search for image from layer %s")
+      msg = msgtrans % self.layerName  
+      self.msgBar.pushMessage( NAME_PLUGIN, msg, QgsMessageBar.WARNING, 2 )
       self.changedTotal.emit( self.layer.id(), "Canceling processing")
       self.killed.emit( self.layer.id() )
       return
@@ -661,7 +654,9 @@ class TableCatalogOTF(QObject):
     self.tableWidget.setCellWidget( row, column, btn )
 
     column = 1 # Total
-    item = QTableWidgetItem("None")
+
+    msgtrans = QCoreApplication.translate("CatalogOTF", "None")
+    item = QTableWidgetItem( msgtrans )
     item.setFlags( Qt.ItemIsSelectable | Qt.ItemIsEnabled )
     self.tableWidget.setItem( row, column, item )
 
@@ -757,8 +752,8 @@ class DockWidgetCatalogOTF(QDockWidget):
     def checkTempDir():
       tempDir = QDir( WorkerPopulateGroup.TEMP_DIR )
       if not tempDir.exists():
-        msgtrans1 = QCoreApplication.translate("CatalogOTF", "Created temporary directory '%s' for TMS")
-        msgtrans2 = QCoreApplication.translate("CatalogOTF", "Not possible create temporary directory '%s' for TMS")
+        msgtrans1 = QCoreApplication.translate("CatalogOTF", "Created temporary directory '%s' for GDAL_WMS")
+        msgtrans2 = QCoreApplication.translate("CatalogOTF", "Not possible create temporary directory '%s' for GDAL_WMS")
         isOk = tempDir.mkpath( WorkerPopulateGroup.TEMP_DIR )
         msgtrans = msgtrans1 if isOk else msgtrans2
         tempDir.setPath( WorkerPopulateGroup.TEMP_DIR )
@@ -832,7 +827,8 @@ class ProjectDockWidgetCatalogOTF():
           fw.close()
           newImages += 1
       if newImages > 0:
-        msg = "Please reopen project - DON'T SAVE. The WMS images were regenerated (%d images)" % newImages
+        msgtrans = QCoreApplication.translate( "CatalogOTF", "Please reopen project - DON'T SAVE. The GDAL_WMS images were regenerated (%d images)" )
+        msg = msgtrans % newImages
         self.iface.messageBar().pushMessage( NAME_PLUGIN, msg, QgsMessageBar.WARNING, 8 )
 
   @pyqtSlot("QDomDocument")
