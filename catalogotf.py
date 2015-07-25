@@ -739,6 +739,7 @@ class DockWidgetCatalogOTF(QDockWidget):
   @pyqtSlot( str )
   def removeLayer(self, layerID):
     self.cotf[ layerID ].worker.kill()
+    del self.cotf[ layerID ]
 
   @pyqtSlot()
   def findCatalogs(self):
