@@ -8,13 +8,14 @@ about=This plugin work with catalog layer.
   See the presentations:
   - http://pt.slideshare.net/LuizMotta3/presentation-2015-0701ibamaplugins
   - http://pt.slideshare.net/LuizMotta3/presentation-2015-0715ibamacatalootfinactions
-version=1.1
+version=1.2
 qgisMinimumVersion=2.8
 category=Raster
 author=Luiz Motta
 email=motta.luiz@gmail.com
-
-changelog=1.1
+changelog=1.2
+  - Decrease number of catalog layer when remove one these
+  1.1
   - Refactoring of cancel process when remove catalog layer
   1.0
   - Added context menu for local image, refactoring the table, change for button for search images

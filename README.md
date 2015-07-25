@@ -12,6 +12,8 @@ Automatically adds  images that are in the catalog layer that intersect with the
 Luiz Motta
 
 ## Changelog
+- 2015-07-25
+Decrease number of catalog layer when remove one these
 - 2015-07-20
 Refactoring of cancel process when remove catalog layer
 - 2015-07-15
