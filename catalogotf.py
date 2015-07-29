@@ -50,6 +50,7 @@ from qgis.core import (
 )
 
 from legendlayer import ( LegendRaster, LegendTMS )
+from sortedlistbythread import SortedListByThread
 
 NAME_PLUGIN = "Catalog On The Fly"
 
@@ -66,11 +67,12 @@ class WorkerPopulateGroup(QObject):
   def __init__(self, addLegendLayer):
     
     super(WorkerPopulateGroup, self).__init__()
+    self.addLegendLayer = addLegendLayer
+
+    self.sortedImages = SortedListByThread()
     self.killed = False
-    #
     self.canvas = qgis.utils.iface.mapCanvas()
     self.logMessage = QgsMessageLog.instance().logMessage
-    self.addLegendLayer = addLegendLayer
     self.nameFieldSource = self.layer = self.ltgCatalog = None
 
   def setData(self, data):
@@ -100,19 +102,19 @@ class WorkerPopulateGroup(QObject):
       rectCanvas = self.canvas.extent() if crsCanvas == crsLayer else ct.transform( self.canvas.extent() )
 
       if not rectLayer.intersects( rectCanvas ):
-        return [] 
+        return ( True, images ) 
 
       fr = QgsFeatureRequest()
       if selectedImage:
         fr.setFilterFids( self.layer.selectedFeaturesIds() )
       index = QgsSpatialIndex( self.layer.getFeatures( fr ) )
       fids = index.intersects( rectCanvas )
-
       del fr
       del index
 
       fr = QgsFeatureRequest()
       fr.setFilterFids ( fids )
+      numImages = len( fids )
       del fids[:]
       it = self.layer.getFeatures( fr ) 
       f = QgsFeature()
@@ -121,14 +123,13 @@ class WorkerPopulateGroup(QObject):
         if f.geometry().intersects( rectCanvas ):
           images.append( getF( f ) )
 
-      return images
+      return ( True, images ) if len( images ) > 0 else ( False, numImages )
 
     def addImages():
 
       def finished(msg=None):
         if not msg is None:
           self.messageStatus.emit( msg )
-        del images[:]
         self.finished.emit( self.isKilled )
 
       def getFileInfoDate( image ):
@@ -221,12 +222,17 @@ class WorkerPopulateGroup(QObject):
           del item[:]
       
       # Sorted images
-      if not self.nameFieldDate  is None:
-        l_image_sorted = sorted( images, key = lambda item: item['date'], reverse = True )
-        l_fileinfo = map( getFileInfoDate, l_image_sorted )
-      else:
-        l_image_sorted = sorted( images, key = lambda item: item['source'], reverse = True )
-        l_fileinfo = map( getFileInfo, l_image_sorted )
+      ( f_key, f_getFileInfo ) = ( lambda item: item['date'], getFileInfoDate ) \
+      if not self.nameFieldDate is None \
+      else                      ( lambda item: item['source'], getFileInfo )
+      l_image_sorted = self.sortedImages.run( images, f_key, True )
+      if self.isKilled:
+        del images[:]
+        finished()
+        return
+
+      del images[:]
+      l_fileinfo = map( f_getFileInfo, l_image_sorted )
       del l_image_sorted[:]
 
       l_raster = []
@@ -298,8 +304,23 @@ class WorkerPopulateGroup(QObject):
 
       finished( str( totalRaster ) )
 
+    msgtrans = QCoreApplication.translate( "CatalogOTF", "Processing..." )
+    self.messageStatus.emit( msgtrans )
+    
     self.isKilled = False
-    images = getImagesByCanvas()
+    ( isOk, value ) = getImagesByCanvas()
+    if self.isKilled:
+      self.finished.emit( self.isKilled )
+      return
+    if not isOk:
+      msgtrans = QCoreApplication.translate( "CatalogOTF", "Total of images(%d) exceeded the query limit." )
+      msg = msgtrans % value 
+      self.messageError.emit( msg )
+      self.messageStatus.emit( "0" )
+      self.finished.emit( self.isKilled )
+      return
+
+    images = value
     msgtrans = QCoreApplication.translate( "CatalogOTF", "Processing %d" )
     msg = msgtrans % len( images)
     self.messageStatus.emit( msg )
@@ -307,6 +328,7 @@ class WorkerPopulateGroup(QObject):
 
   def kill(self):
     self.isKilled = True
+    self.sortedImages.kill()
 
 
 class CatalogOTF(QObject):
