@@ -27,7 +27,7 @@ from os import makedirs
 import json
 
 from PyQt4.QtCore import ( 
-     Qt, QObject, QThread, QFileInfo, QDir, QVariant, QCoreApplication,
+     Qt, QObject, QThread, QFileInfo, QDir, QVariant, QDate, QCoreApplication,
      QPyNullVariant, pyqtSignal, pyqtSlot
 )
 from PyQt4.QtGui  import (
@@ -51,6 +51,7 @@ from qgis.core import (
 
 from legendlayer import ( LegendRaster, LegendTMS )
 from sortedlistbythread import SortedListByThread
+from PyQt4.Qt import QDate
 
 NAME_PLUGIN = "Catalog On The Fly"
 
@@ -193,7 +194,8 @@ class WorkerPopulateGroup(QObject):
         return { 'fileinfo': fi  }
 
       def getNameLayerDate(id):
-        vdate = l_fileinfo[ id ]['date'].toString( "yyyy-MM-dd" )
+        value = l_fileinfo[ id ]['date']
+        vdate = value.toString( "yyyy-MM-dd" ) if type( value ) is QDate else value
         name = l_layer[ id ].name()
         return "%s (%s)" % ( vdate, name )
 
@@ -541,7 +543,7 @@ class CatalogOTF(QObject):
       else:
         return f
 
-    def hasAddress(feature, idField):
+    def hasAddress(feature, nameField):
 
       def asValidUrl( url):
         isOk = True
@@ -554,7 +556,7 @@ class CatalogOTF(QObject):
         #
         return isOk  
 
-      value = feature.attributes()[ idField ]
+      value = feature.attribute( nameField )
       if value is None or type(value) == QPyNullVariant:
         return False
 
@@ -567,12 +569,14 @@ class CatalogOTF(QObject):
       fileInfo = QFileInfo( value )
       return fileInfo.isFile()
 
-    def hasDate(feature, idField):
-      value = feature.attributes()[ idField ]
+    def hasDate(feature, nameField):
+      value = feature.attribute( nameField )
       if value is None or type(value) == QPyNullVariant:
         return False
-      #          
-      return True if value.isValid() else False
+      
+      date = value if type( value) is QDate else QDate.fromString( value, 'yyyy-MM-dd' )
+                
+      return True if date.isValid() else False
 
     if layer is None or layer.type() != QgsMapLayer.VectorLayer or layer.geometryType() != QGis.Polygon:
       return None
@@ -585,12 +589,15 @@ class CatalogOTF(QObject):
     fieldDate = None
     isOk = False
     for item in layer.pendingFields().toList():
+      nameField = item.name()
       if item.type() == QVariant.String:
-        if fieldSource is None and hasAddress( firstFeature, layer.fieldNameIndex( item.name() ) ):
-          fieldSource = item.name()
+        if fieldSource is None and hasAddress( firstFeature, nameField ):
+          fieldSource = nameField
+        elif fieldDate is None and hasDate( firstFeature, nameField ):
+          fieldDate = nameField
       elif item.type() == QVariant.Date:
-        if fieldDate is None and hasDate( firstFeature, layer.fieldNameIndex( item.name() ) ):
-          fieldDate = item.name()
+        if fieldDate is None and hasDate( firstFeature, nameField ):
+          fieldDate = nameField
     if not fieldSource is None:
       isOk = True
 

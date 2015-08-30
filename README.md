@@ -12,6 +12,8 @@ Automatically adds  images that are in the catalog layer that intersect with the
 Luiz Motta
 
 ## Changelog
+- 2015-08-30
+Identifies date field, where, type is Text, the format of values are yyyy-MM-dd
 - 2015-07-28
 Updated the procedure cancel huge data
 - 2015-07-25
