@@ -12,6 +12,8 @@ Automatically adds  images that are in the catalog layer that intersect with the
 Luiz Motta
 
 ## Changelog
+- 2016-03-30
+Check if has valid link for XML and add message when not valid. Fixed bug when link is broken
 - 2015-08-30
 Identifies date field, where, type is Text, the format of values are yyyy-MM-dd
 - 2015-07-28

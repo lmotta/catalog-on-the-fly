@@ -133,55 +133,36 @@ class WorkerPopulateGroup(QObject):
           self.messageStatus.emit( msg )
         self.finished.emit( self.isKilled )
 
-      def getFileInfoDate( image ):
-
-        def prepareFileTMS( url_tms ):
-
-          def createLocalFile():
-            response = urllib2.urlopen( url_tms )
-            html = response.read()
-            response.close()
-
-            fw = open( localName, 'w' )
-            fw.write( html )
-            fw.close()
-
-          localName = "%s/%s" % ( self.TEMP_DIR, basename( url_tms ) )
-          fileInfo = QFileInfo( localName )
-
-          if not fileInfo.exists():
-            createLocalFile()
-            fileInfo = QFileInfo( localName )
-
-          return fileInfo
-
-        source = image[ 'source' ]
-        isUrl = source.find('http://') == 0 or source.find('https://') == 0
-        lenSource = len( source)
-        isUrl = isUrl and source.rfind( 'xml', lenSource - len( 'xml' ) ) == lenSource - len( 'xml' )   
-        fi = prepareFileTMS( source ) if isUrl else QFileInfo( source )
-
-        return { 'fileinfo': fi, 'date': image[ 'date' ] }
-
       def getFileInfo( image ):
 
         def prepareFileTMS( url_tms ):
 
           def createLocalFile():
-            response = urllib2.urlopen( url_tms )
-            html = response.read()
-            response.close()
+            def populateLocalFile():
+              html = response.read()
+              response.close()
+              fw = open( localName, 'w' )
+              fw.write( html )
+              fw.close()
 
-            fw = open( localName, 'w' )
-            fw.write( html )
-            fw.close()
+            isOk = True
+            try:
+              response = urllib2.urlopen( url_tms )
+            except urllib2.HTTPError, e:
+              isOk = False
+            except urllib2.URLError, e:
+              isOk = False
+            #
+            if not isOk:
+              return QFileInfo( url_tms ) # Add for error list
+            else:
+              populateLocalFile()
+              return QFileInfo( localName )
 
           localName = "%s/%s" % ( self.TEMP_DIR, basename( url_tms ) )
           fileInfo = QFileInfo( localName )
-
           if not fileInfo.exists():
-            createLocalFile()
-            fileInfo = QFileInfo( localName )
+            fileInfo = createLocalFile()
 
           return fileInfo
 
@@ -191,7 +172,11 @@ class WorkerPopulateGroup(QObject):
         isUrl = isUrl and source.rfind( 'xml', lenSource - len( 'xml' ) ) == lenSource - len( 'xml' )   
         fi = prepareFileTMS( source ) if isUrl else QFileInfo( source )
 
-        return { 'fileinfo': fi  }
+        dicReturn = { 'fileinfo': fi  }
+        if image.has_key( 'date'):
+          dicReturn['date'] = image['date']
+
+        return dicReturn
 
       def getNameLayerDate(id):
         value = l_fileinfo[ id ]['date']
@@ -224,49 +209,41 @@ class WorkerPopulateGroup(QObject):
           del item[:]
       
       # Sorted images
-      ( f_key, f_getFileInfo ) = ( lambda item: item['date'], getFileInfoDate ) \
-      if not self.nameFieldDate is None \
-      else                      ( lambda item: item['source'], getFileInfo )
+      key = 'date' if not self.nameFieldDate is None else 'source'
+      f_key = lambda item: item[ key ]  
       l_image_sorted = self.sortedImages.run( images, f_key, True )
       if self.isKilled:
         del images[:]
         finished()
         return
-
       del images[:]
-      l_fileinfo = map( f_getFileInfo, l_image_sorted )
+
+      l_fileinfo = map( getFileInfo, l_image_sorted )
       del l_image_sorted[:]
 
       l_raster = []
-      for item in l_fileinfo:
-        l_raster.append( QgsRasterLayer( item['fileinfo'].filePath(), item['fileinfo'].baseName() ) )
+      l_error = []
+      l_idRemove = []
+      idRemove = 0
+      for fi in l_fileinfo:
+        layer = QgsRasterLayer( fi['fileinfo'].filePath(), fi['fileinfo'].baseName() )
+        if layer.isValid():
+          l_raster.append( layer )
+        else:
+          l_error.append( layer.source() )
+          del layer
+          l_idRemove.append( idRemove )
+        idRemove += 1
         if self.isKilled:
-          del l_fileinfo[:]
-          del l_raster[:]
+          cleanLists( [ l_fileinfo, l_raster, l_error, l_idRemove ] )
           finished()
           return
-      # l_fileinfo, l_raster
-
-      # Invalid raster
-      l_id_error = []
-      for id in range( 0, len( l_raster ) ):
-        if not l_raster[ id ].isValid():
-          l_id_error.append( id )
-      # l_fileinfo, l_raster, l_id_error
-
-      l_error = None
-      l_id_error.reverse()
-      if len( l_id_error ) > 0:
-        l_error = map( lambda item: item.source(), l_raster )
-        l_removes = [ l_fileinfo, l_raster ]
-        for id in l_id_error:
-          for item in l_removes:
-            item.remove( item[ id ] )
-        del l_id_error[:]
-        del l_removes[:]
-
-      del l_id_error[:]
-      # l_fileinfo, l_raster, l_error
+      if len( l_idRemove ) > 0:
+        l_idRemove.reverse()
+        for id in l_idRemove:
+          del l_fileinfo[ id ]
+        del l_idRemove[:]
+      # l_fileinfo, l_raster, l_error 
 
       totalRaster = len( l_raster ) 
       # Add raster
@@ -278,12 +255,12 @@ class WorkerPopulateGroup(QObject):
             break
           l_layer.append( QgsMapLayerRegistry.instance().addMapLayer( item, addToLegend=False ) )
         if self.isKilled:
-          cleanLists( [ l_fileinfo, l_error, l_layer ] )
+          cleanLists( [ l_fileinfo, l_raster, l_error, l_layer ] )
           finished()
           return
-
+        del l_raster[:]
         # l_fileinfo, l_error, l_layer
-        getN = getNameLayerDate if not self.nameFieldDate  is None else getNameLayer
+        getN = getNameLayer if self.nameFieldDate is None else getNameLayerDate
         for id in range( 0, len( l_layer ) ):
           ltl = self.ltgCatalog.addLayer( l_layer[ id ] )
           ltl.setVisible( Qt.Unchecked )
@@ -291,9 +268,10 @@ class WorkerPopulateGroup(QObject):
           ltl.setLayerName( name )
           self.addLegendLayer( l_layer[ id ] )
         cleanLists( [ l_fileinfo, l_layer ] )
+        # l_error
 
       # Message Error
-      if not l_error is None:
+      if len( l_error) > 0:
         for item in l_error:
           msgtrans = QCoreApplication.translate( "CatalogOTF", "Invalid image: %s" )
           msg = msgtrans % item
