@@ -1,118 +1,122 @@
 <?xml version="1.0" encoding="utf-8"?>
 <!DOCTYPE TS>
-<TS version="2.0" language="pt_BR" sourcelanguage="en_US">
+<TS version="2.1" language="pt_BR">
 <context>
     <name>CatalogOTF</name>
     <message>
-        <location filename="../catalogotf.py" line="78"/>
-        <source>Geometry of feature (fid = %d) of layer (&apos;%s&apos;) is invalid</source>
-        <translation type="obsolete">Imagem (%s) não está na camada de catálogo(&apos;%s&apos;)</translation>
+        <location filename="../__init__.py" line="58"/>
+        <source>Adding images from catalog layer</source>
+        <translation>Adicionando imagens a partir da camada de catálogo</translation>
     </message>
     <message>
-        <location filename="../catalogotf.py" line="305"/>
-        <source>Images invalid:\n%s</source>
-        <translation type="obsolete">Imagens inválidas:\n%s</translation>
+        <location filename="../catalogotf.py" line="70"/>
+        <source>Layers({}) - Features</source>
+        <translation>Camadas({}) - Feições</translation>
     </message>
     <message>
-        <location filename="../catalogotf.py" line="303"/>
-        <source>Processing %d</source>
-        <translation>Processando %d</translation>
+        <location filename="../catalogotf.py" line="71"/>
+        <source>Run({} selected)</source>
+        <translation>Executar({} selecionado)</translation>
     </message>
     <message>
-        <location filename="../catalogotf.py" line="396"/>
-        <source>Image (%s) not in catalog layer (&apos;%s&apos;)</source>
-        <translation type="obsolete">Imagem (%s) não está na camada de catálogo(&apos;%s&apos;)</translation>
+        <location filename="../catalogotf.py" line="72"/>
+        <source>Cancel({} selected)</source>
+        <translation>Cancelar({} selecionado)</translation>
     </message>
     <message>
-        <location filename="../catalogotf.py" line="409"/>
-        <source>Need define layer catalog</source>
-        <translation>Precisa definir a camada de catálogo</translation>
+        <location filename="../catalogotf.py" line="73"/>
+        <source>Fields: Source({}) and Date({})</source>
+        <translation>Campos: Fonte({}) e data({})</translation>
     </message>
     <message>
-        <location filename="../catalogotf.py" line="740"/>
-        <source>Layer,Group,Total,Select,Highlight,Zoom</source>
-        <translation type="obsolete">Camada,Grupo,Total,Seleção,Realçar,Zoom</translation>
-    </message>
-    <message>
-        <location filename="../catalogotf.py" line="716"/>
+        <location filename="../catalogotf.py" line="74"/>
         <source>Find catalog</source>
-        <translation>Procurar por catálogos</translation>
+        <translation>Encontrar catálogo</translation>
     </message>
     <message>
-        <location filename="../catalogotf.py" line="792"/>
-        <source>Did not find a new catalog. Catalog layers %d of %d(polygon layers)</source>
-        <translation>Não foi encontrado uma nova camada de catálogo. Camadas de catálogos %d de %d(camada de polígonos)</translation>
+        <location filename="../catalogotf.py" line="77"/>
+        <source>Click select all / CTRL+Click unselect all</source>
+        <translation>Clique selecionar todos / CTRL+Clique desselecionar todos</translation>
     </message>
     <message>
-        <location filename="../__init__.py" line="75"/>
-        <source>Catalog on the fly</source>
-        <translation type="obsolete">Catálogo on the fly</translation>
+        <location filename="../catalogotf.py" line="327"/>
+        <source>{} - Total of errors: {}</source>
+        <translation>{} - Total de erros: {}</translation>
     </message>
     <message>
-        <location filename="../catalogotf.py" line="407"/>
-        <source>Canceled search for image from layer </source>
-        <translation type="obsolete">Cancelado a procura de images a partir da camada
-</translation>
+        <location filename="../catalogotf.py" line="390"/>
+        <source>Cancelled by user</source>
+        <translation>Cancelado pelo usuário</translation>
     </message>
     <message>
-        <location filename="../catalogotf.py" line="598"/>
-        <source>Layer,Total</source>
-        <translation>Camada,Total</translation>
+        <location filename="../catalogotf.py" line="426"/>
+        <source>Created diretory {}</source>
+        <translation>Criado o diretório {}</translation>
     </message>
     <message>
-        <location filename="../catalogotf.py" line="760"/>
-        <source>Created temporary directory &apos;%s&apos; for TMS</source>
-        <translation type="obsolete">Criado diretório temporário &apos;%s&quot; para os TMS</translation>
+        <location filename="../catalogotf.py" line="429"/>
+        <source>Diretory {} for virtual raster(XML)</source>
+        <translation>Diretório {} para imagens virtuais(XML)</translation>
     </message>
     <message>
-        <location filename="../catalogotf.py" line="761"/>
-        <source>Not possible create temporary directory &apos;%s&apos; for TMS</source>
-        <translation type="obsolete">Não é possível criar diretório temporário &apos;%s&apos; para os TMS</translation>
+        <location filename="../catalogotf.py" line="485"/>
+        <source>Added {} layer(s)</source>
+        <translation>Adicionado {} camada(s)</translation>
     </message>
     <message>
-        <location filename="../catalogotf.py" line="755"/>
-        <source>Created temporary directory &apos;%s&apos; for GDAL_WMS</source>
-        <translation>Criado diretório temporário &apos;%s&apos; para GDAL_WMS</translation>
+        <location filename="../catalogotf.py" line="491"/>
+        <source>Not found a new catalog layer</source>
+        <translation>Não foi encontrado uma nova camada de catálogo</translation>
     </message>
     <message>
-        <location filename="../catalogotf.py" line="756"/>
-        <source>Not possible create temporary directory &apos;%s&apos; for GDAL_WMS</source>
-        <translation>Não foi possível criar o diretório temporário &apos;%s&apos; para GDAL_WMS</translation>
+        <location filename="../catalogotf.py" line="544"/>
+        <source>Error &apos;{}&apos;</source>
+        <translation>Erro &apos;{}&apos;</translation>
     </message>
     <message>
-        <location filename="../catalogotf.py" line="830"/>
-        <source>Please reopen project - DON&apos;T SAVE. The GDAL_WMS images were regenerated (%d images)</source>
-        <translation>Por favor abra novamente o projeto - Não salve. As imagens GDAL_WMS serão regeradas (%d imagens)</translation>
+        <location filename="../catalogotf.py" line="735"/>
+        <source>{} - Cancelled</source>
+        <translation>{} - Cancelado</translation>
     </message>
     <message>
-        <location filename="../catalogotf.py" line="290"/>
-        <source>Invalid image: %s</source>
-        <translation>Imagem inválida: %s</translation>
+        <location filename="../catalogotf.py" line="738"/>
+        <source>{} ({} Total)</source>
+        <translation>{} ({} Total)</translation>
     </message>
     <message>
-        <location filename="../catalogotf.py" line="294"/>
-        <source>Images invalids: %d. See log message</source>
-        <translation>Imagens inválidas: %d. Veja o log de mensagens</translation>
+        <location filename="../catalogotf.py" line="139"/>
+        <source>{} Selected</source>
+        <translation>{} Selecionados</translation>
     </message>
     <message>
-        <location filename="../catalogotf.py" line="401"/>
-        <source>Canceled search for image from layer %s</source>
-        <translation>Cancelado a procura de imagens a partir da camada %s</translation>
+        <location filename="../catalogotf.py" line="143"/>
+        <source>{} Total</source>
+        <translation>{} Total</translation>
     </message>
     <message>
-        <location filename="../catalogotf.py" line="658"/>
-        <source>None</source>
-        <translation>Sem</translation>
+        <location filename="../catalogotf.py" line="166"/>
+        <source>{} in View - Running...</source>
+        <translation>{} na visão - Executando...</translation>
     </message>
     <message>
-        <location filename="../legendlayer.py" line="36"/>
-        <source>Highlight</source>
-        <translation>Realçar</translation>
+        <location filename="../catalogotf.py" line="300"/>
+        <source>Waiting...</source>
+        <translation>Esperando...</translation>
     </message>
     <message>
-        <location filename="../legendlayer.py" line="42"/>
-        <source>Zoom to</source>
-        <translation>Zoom para</translation>
+        <location filename="../catalogotf.py" line="344"/>
+        <source>Running...</source>
+        <translation>Executando...</translation>
+    </message>
+    <message>
+        <location filename="../catalogotf.py" line="304"/>
+        <source>Finished.</source>
+        <translation>Terminou.</translation>
+    </message>
+    <message>
+        <location filename="../catalogotf.py" line="307"/>
+        <source>Canceled</source>
+        <translation>Cancelado</translation>
     </message>
 </context>
 </TS>

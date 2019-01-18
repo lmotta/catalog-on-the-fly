@@ -12,6 +12,8 @@ Automatically adds  images that are in the catalog layer that intersect with the
 Luiz Motta
 
 ## Changelog
+- 2019-01-18
+Migrated to QGIS 3.2
 - 2016-03-30
 Check if has valid link for XML and add message when not valid. Fixed bug when link is broken
 - 2015-08-30

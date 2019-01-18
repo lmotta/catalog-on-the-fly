@@ -18,83 +18,75 @@ email                : motta.luiz@gmail.com
  *                                                                         *
  ***************************************************************************/
 """
+import os, stat, sys, re, shutil, filecmp
 
-import os.path
+from qgis.PyQt.QtCore import Qt, QObject, QSettings, QCoreApplication, pyqtSlot
+from qgis.PyQt.QtGui import QIcon
+from qgis.PyQt.QtWidgets import QAction
 
-from PyQt4.QtGui import ( QAction, QIcon )
-from PyQt4.QtCore import ( Qt, QSettings, QTranslator, QCoreApplication, qVersion, pyqtSlot )
+from qgis.core import Qgis, QgsProject
 
-from qgis.core import ( QgsProject, QgsMapLayerRegistry )
-
-from catalogotf import ( ProjectDockWidgetCatalogOTF, DockWidgetCatalogOTF )
+from .catalogotf import DockWidgetCatalogOTF
+from .translate import Translate
 
 def classFactory(iface):
-  return CatalogOTFPlugin( iface )
+    return CatalogOTFPlugin( iface )
 
-class CatalogOTFPlugin:
+class CatalogOTFPlugin(QObject):
+    def __init__(self, iface):
+        super().__init__()
+        self.iface = iface
+        # self.projOTF = ProjectDockWidgetCatalogOTF( iface )
+        self.name = u'&Catalog OTF'
+        self.dock = None
+        self.translate = Translate('catalogotf')
 
-  def __init__(self, iface):
+    def _connect(self, isConnect = True):
+        signal_slot = (
+            { 'signal': QgsProject.instance().readProject, 'slot': self.projOTF.onReadProject },
+            { 'signal': QgsProject.instance().writeProject, 'slot': self.projOTF.onWriteProject }
+        )
+        if isConnect:
+            for item in signal_slot:
+                item['signal'].connect( item['slot'] )
+        else:
+            for item in signal_slot:
+                item['signal'].disconnect( item['slot'] )
 
-    def translate():
-      #
-      # For create file 'qm'
-      # 1) Define that files need for translation: catalogotf.pro
-      # 2) Create 'ts': pylupdate4 -verbose catalogotf.pro
-      # 3) Edit your translation: QtLinquist
-      # 4) Create 'qm': lrelease catalogotf_pt_BR.ts
-      #
-      dirname = os.path.dirname( os.path.abspath(__file__) )
-      locale = QSettings().value("locale/userLocale")
-      localePath = os.path.join( dirname, "i18n", "%s_%s.qm" % ( name_src, locale ) )
-      if os.path.exists(localePath):
-        self.translator = QTranslator()
-        self.translator.load(localePath)
-        if qVersion() > '4.3.3':
-          QCoreApplication.installTranslator(self.translator)      
+    def initGui(self):
+        name = 'Catalog OTF'
+        about = QCoreApplication.translate('CatalogOTF', 'Adding images from catalog layer')
+        icon = QIcon( os.path.join( os.path.dirname(__file__), 'catalogotf.svg' ) )
+        self.action = QAction( icon, name, self.iface.mainWindow() )
+        self.action.setObjectName( name.replace(' ', '') )
+        self.action.setWhatsThis( about )
+        self.action.setStatusTip( about )
+        self.action.setCheckable( True )
+        self.action.triggered.connect( self.run )
 
-    self.iface = iface
-    self.projOTF = ProjectDockWidgetCatalogOTF( iface )
-    self.name = u"&Catalog OTF"
-    self.dock = None
-    name_src = "catalogotf"
-    translate()
+        self.iface.addRasterToolBarIcon( self.action )
+        self.iface.addPluginToRasterMenu( self.name, self.action )
 
-  def _connect(self, isConnect = True):
-    signal_slot = (
-      { 'signal': QgsProject.instance().readProject, 'slot': self.projOTF.onReadProject },
-      { 'signal': QgsProject.instance().writeProject, 'slot': self.projOTF.onWriteProject }
-    )
-    if isConnect:
-      for item in signal_slot:
-        item['signal'].connect( item['slot'] )
-    else:
-      for item in signal_slot:
-        item['signal'].disconnect( item['slot'] )
+        #self._connect()
 
-  def initGui(self):
-    msgtrans = QCoreApplication.translate("CatalogOTF", "Catalog on the fly")
-    icon = QIcon( os.path.join( os.path.dirname(__file__), 'catalogotf.svg' ) )
-    self.action = QAction( icon, msgtrans, self.iface.mainWindow() )
-    self.action.setObjectName("CatalogOTF")
-    self.action.setWhatsThis( msgtrans )
-    self.action.setStatusTip( msgtrans )
-    self.action.triggered.connect( self.run )
+        self.dock = DockWidgetCatalogOTF( self.iface )
+        self.iface.addDockWidget( Qt.RightDockWidgetArea , self.dock )
+        self.dock.visibilityChanged.connect( self.dockVisibilityChanged )
 
-    self.iface.addToolBarIcon( self.action )
-    self.iface.addPluginToRasterMenu( self.name, self.action )
+    def unload(self):
+        self.iface.removeRasterToolBarIcon( self.action )
+        self.iface.removePluginRasterMenu( self.name, self.action )
+        self.dock.close()
+        self.dock = None
+        # self._connect( False )
 
-    self._connect()
+    @pyqtSlot()
+    def run(self):
+        if self.dock.isVisible():
+            self.dock.hide()
+        else:
+            self.dock.show()
 
-  def unload(self):
-    self.iface.removePluginMenu( self.name, self.action )
-    self.iface.removeToolBarIcon( self.action )
-    del self.action
-    del self.dock
-    self._connect( False )
-  
-  @pyqtSlot()
-  def run(self):
-    self.dock = DockWidgetCatalogOTF( self.iface ) 
-    self.iface.addDockWidget( Qt.LeftDockWidgetArea , self.dock )
-    self.action.setEnabled( False )
-    
+    @pyqtSlot(bool)
+    def dockVisibilityChanged(self, visible):
+        self.action.setChecked( visible )

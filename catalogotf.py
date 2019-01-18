@@ -18,856 +18,834 @@ email                : motta.luiz@gmail.com
  *                                                                         *
  ***************************************************************************/
 """
+import urllib.request
+import urllib.error
 
-import urllib2
-from datetime import datetime
-from os.path import ( basename, dirname, sep as sepPath, isdir, join as joinPath )
-from os import makedirs
+from os.path import basename, dirname, join as joinPath
 
-import json
-
-from PyQt4.QtCore import ( 
-     Qt, QObject, QThread, QFileInfo, QDir, QVariant, QDate, QCoreApplication,
-     QPyNullVariant, pyqtSignal, pyqtSlot
+from qgis.PyQt.QtCore import (
+    QObject, Qt, QCoreApplication,
+    QVariant, QDate,
+    QFileInfo, QDir,
+    pyqtSlot, pyqtSignal,
 )
-from PyQt4.QtGui  import (
-     QAction,
-     QApplication,  QCursor, QColor, QIcon,
-     QTableWidget, QTableWidgetItem,
-     QPushButton, QGridLayout, QProgressBar, QDockWidget, QWidget
-)
-from PyQt4.QtXml import QDomDocument
 
-import qgis
-from qgis.gui import ( QgsMessageBar ) 
+from qgis.PyQt.QtGui import QIcon, QFont, QCursor
+
+from qgis.PyQt.QtXml import QDomDocument
+
+from qgis.PyQt.QtWidgets import (
+    QWidget, QDockWidget,
+    QTableWidget, QTableWidgetItem,
+    QVBoxLayout, QHBoxLayout,
+    QPushButton,
+    QApplication
+)
+
 from qgis.core import (
-  QgsProject, QGis, QgsMessageLog,
-  QgsMapLayerRegistry, QgsMapLayer,
-  QgsFeature, QgsFeatureRequest, QgsGeometry, QgsRectangle,  QgsSpatialIndex,
-  QgsCoordinateTransform,
-  QgsRasterLayer, QgsRasterTransparency,
-  QgsLayerTreeNode
+    Qgis, QgsWkbTypes,
+    QgsMessageLog,
+    QgsApplication, QgsTask, QgsProject,
+    QgsMapLayer, QgsRasterLayer, QgsLayerTreeNode, QgsRasterTransparency, QgsFeature,
+    QgsFeatureRequest, QgsSpatialIndex,
+    QgsCoordinateTransform,
 )
 
-from legendlayer import ( LegendRaster, LegendTMS )
-from sortedlistbythread import SortedListByThread
-from PyQt4.Qt import QDate
-
-NAME_PLUGIN = "Catalog On The Fly"
-
-class WorkerPopulateGroup(QObject):
-
-  # Static
-  TEMP_DIR = "/tmp"
-  
-  # Signals 
-  finished = pyqtSignal( bool )
-  messageStatus = pyqtSignal( str )
-  messageError = pyqtSignal( str )
-
-  def __init__(self, addLegendLayer):
-    
-    super(WorkerPopulateGroup, self).__init__()
-    self.addLegendLayer = addLegendLayer
-
-    self.sortedImages = SortedListByThread()
-    self.killed = False
-    self.canvas = qgis.utils.iface.mapCanvas()
-    self.logMessage = QgsMessageLog.instance().logMessage
-    self.nameFieldSource = self.layer = self.ltgCatalog = None
-
-  def setData(self, data):
-    self.nameFieldSource = data[ 'nameFieldSource' ]
-    self.nameFieldDate = data[ 'nameFieldDate' ]
-    self.layer = data[ 'layer' ]
-    self.ltgCatalog = data[ 'ltgCatalog' ]
-
-  @pyqtSlot()
-  def run(self):
-
-    def getImagesByCanvas():
-      def getSourceDate(feat):
-        return { 'source': feat[ self.nameFieldSource ], 'date': feat[ self.nameFieldDate ] } 
-
-      def getSource(feat):
-        return { 'source': feat[ self.nameFieldSource ] }
-
-      images = []
-
-      selectedImage = self.layer.selectedFeatureCount() > 0
-      rectLayer = self.layer.extent() if not selectedImage else self.layer.boundingBoxOfSelected()
-      crsLayer = self.layer.crs()
-
-      crsCanvas = self.canvas.mapSettings().destinationCrs()
-      ct = QgsCoordinateTransform( crsCanvas, crsLayer )
-      rectCanvas = self.canvas.extent() if crsCanvas == crsLayer else ct.transform( self.canvas.extent() )
-
-      if not rectLayer.intersects( rectCanvas ):
-        return ( True, images ) 
-
-      fr = QgsFeatureRequest()
-      if selectedImage:
-        fr.setFilterFids( self.layer.selectedFeaturesIds() )
-      index = QgsSpatialIndex( self.layer.getFeatures( fr ) )
-      fids = index.intersects( rectCanvas )
-      del fr
-      del index
-
-      fr = QgsFeatureRequest()
-      fr.setFilterFids ( fids )
-      numImages = len( fids )
-      del fids[:]
-      it = self.layer.getFeatures( fr ) 
-      f = QgsFeature()
-      getF = getSourceDate if not self.nameFieldDate  is None else  getSource
-      while it.nextFeature( f ):
-        if f.geometry().intersects( rectCanvas ):
-          images.append( getF( f ) )
-
-      return ( True, images ) if len( images ) > 0 else ( False, numImages )
-
-    def addImages():
-
-      def finished(msg=None):
-        if not msg is None:
-          self.messageStatus.emit( msg )
-        self.finished.emit( self.isKilled )
-
-      def getFileInfo( image ):
-
-        def prepareFileTMS( url_tms ):
-
-          def createLocalFile():
-            def populateLocalFile():
-              html = response.read()
-              response.close()
-              fw = open( localName, 'w' )
-              fw.write( html )
-              fw.close()
-
-            isOk = True
-            try:
-              response = urllib2.urlopen( url_tms )
-            except urllib2.HTTPError, e:
-              isOk = False
-            except urllib2.URLError, e:
-              isOk = False
-            #
-            if not isOk:
-              return QFileInfo( url_tms ) # Add for error list
-            else:
-              populateLocalFile()
-              return QFileInfo( localName )
-
-          localName = "%s/%s" % ( self.TEMP_DIR, basename( url_tms ) )
-          fileInfo = QFileInfo( localName )
-          if not fileInfo.exists():
-            fileInfo = createLocalFile()
-
-          return fileInfo
-
-        source = image[ 'source' ]
-        isUrl = source.find('http://') == 0 or source.find('https://') == 0
-        lenSource = len( source)
-        isUrl = isUrl and source.rfind( 'xml', lenSource - len( 'xml' ) ) == lenSource - len( 'xml' )   
-        fi = prepareFileTMS( source ) if isUrl else QFileInfo( source )
-
-        dicReturn = { 'fileinfo': fi  }
-        if image.has_key( 'date'):
-          dicReturn['date'] = image['date']
-
-        return dicReturn
-
-      def getNameLayerDate(id):
-        value = l_fileinfo[ id ]['date']
-        vdate = value.toString( "yyyy-MM-dd" ) if type( value ) is QDate else value
-        name = l_layer[ id ].name()
-        return "%s (%s)" % ( vdate, name )
-
-      def getNameLayer(id):
-        return l_layer[ id ].name()
-
-      def setTransparence():
-
-        def getListTTVP():
-          t = QgsRasterTransparency.TransparentThreeValuePixel()
-          t.red = t.green = t.blue = 0.0
-          t.percentTransparent = 100.0
-          return [ t ]
-        
-        extension = ".xml"
-        l_ttvp = getListTTVP()
-        #
-        for id in range( 0, len( l_raster ) ):
-          fileName = l_fileinfo[ id ]['fileinfo'].fileName()
-          idExt = fileName.rfind( extension )
-          if idExt == -1 or len( fileName ) != ( idExt + len ( extension ) ):
-            l_raster[ id ].renderer().rasterTransparency().setTransparentThreeValuePixelList( l_ttvp )
-
-      def cleanLists( lsts ):
-        for item in lsts:
-          del item[:]
-      
-      # Sorted images
-      key = 'date' if not self.nameFieldDate is None else 'source'
-      f_key = lambda item: item[ key ]  
-      l_image_sorted = self.sortedImages.run( images, f_key, True )
-      if self.isKilled:
-        del images[:]
-        finished()
-        return
-      del images[:]
-
-      l_fileinfo = map( getFileInfo, l_image_sorted )
-      del l_image_sorted[:]
-
-      l_raster = []
-      l_error = []
-      l_idRemove = []
-      idRemove = 0
-      for fi in l_fileinfo:
-        layer = QgsRasterLayer( fi['fileinfo'].filePath(), fi['fileinfo'].baseName() )
-        if layer.isValid():
-          l_raster.append( layer )
-        else:
-          l_error.append( layer.source() )
-          del layer
-          l_idRemove.append( idRemove )
-        idRemove += 1
-        if self.isKilled:
-          cleanLists( [ l_fileinfo, l_raster, l_error, l_idRemove ] )
-          finished()
-          return
-      if len( l_idRemove ) > 0:
-        l_idRemove.reverse()
-        for id in l_idRemove:
-          del l_fileinfo[ id ]
-        del l_idRemove[:]
-      # l_fileinfo, l_raster, l_error 
-
-      totalRaster = len( l_raster ) 
-      # Add raster
-      if totalRaster > 0:
-        setTransparence()
-        l_layer = []
-        for item in l_raster:
-          if self.isKilled:
-            break
-          l_layer.append( QgsMapLayerRegistry.instance().addMapLayer( item, addToLegend=False ) )
-        if self.isKilled:
-          cleanLists( [ l_fileinfo, l_raster, l_error, l_layer ] )
-          finished()
-          return
-        del l_raster[:]
-        # l_fileinfo, l_error, l_layer
-        getN = getNameLayer if self.nameFieldDate is None else getNameLayerDate
-        for id in range( 0, len( l_layer ) ):
-          ltl = self.ltgCatalog.addLayer( l_layer[ id ] )
-          ltl.setVisible( Qt.Unchecked )
-          name = getN( id )
-          ltl.setLayerName( name )
-          self.addLegendLayer( l_layer[ id ] )
-        cleanLists( [ l_fileinfo, l_layer ] )
-        # l_error
-
-      # Message Error
-      if len( l_error) > 0:
-        for item in l_error:
-          msgtrans = QCoreApplication.translate( "CatalogOTF", "Invalid image: %s" )
-          msg = msgtrans % item
-          self.logMessage( msg, "Catalog OTF", QgsMessageLog.CRITICAL )
-
-        msgtrans = QCoreApplication.translate( "CatalogOTF", "Images invalids: %d. See log message" )
-        msg = msgtrans % len( l_error ) 
-        self.messageError.emit( msg )
-        del l_error[:]
-
-      finished( str( totalRaster ) )
-
-    msgtrans = QCoreApplication.translate( "CatalogOTF", "Processing..." )
-    self.messageStatus.emit( msgtrans )
-    
-    self.isKilled = False
-    ( isOk, value ) = getImagesByCanvas()
-    if self.isKilled:
-      self.finished.emit( self.isKilled )
-      return
-    if not isOk:
-      msgtrans = QCoreApplication.translate( "CatalogOTF", "Total of images(%d) exceeded the query limit." )
-      msg = msgtrans % value 
-      self.messageError.emit( msg )
-      self.messageStatus.emit( "0" )
-      self.finished.emit( self.isKilled )
-      return
-
-    images = value
-    msgtrans = QCoreApplication.translate( "CatalogOTF", "Processing %d" )
-    msg = msgtrans % len( images)
-    self.messageStatus.emit( msg )
-    addImages()
-
-  def kill(self):
-    self.isKilled = True
-    self.sortedImages.kill()
-
-
-class CatalogOTF(QObject):
-  
-  # Signals 
-  settedLayer = pyqtSignal( "QgsVectorLayer")
-  removedLayer = pyqtSignal( str )
-  killed = pyqtSignal( str )
-  changedNameLayer = pyqtSignal( str, str )
-  changedTotal = pyqtSignal( str, str )
-  changedIconRun = pyqtSignal( str, bool )
-
-  def __init__(self, iface, tableCOTF):
-    
-    def connecTableCOTF():
-      self.settedLayer.connect( tableCOTF.insertRow )
-      self.removedLayer.connect( tableCOTF.removeRow )
-      self.changedNameLayer.connect( tableCOTF.changedNameLayer )
-      self.changedTotal.connect( tableCOTF.changedTotal )
-      self.changedIconRun.connect( tableCOTF.changedIconRun )
-      self.killed.connect( tableCOTF.killed )
-
-    super(CatalogOTF, self).__init__()
-    self.iface = iface
-    self.canvas = iface.mapCanvas()
-    self.ltv = iface.layerTreeView()
-    self.model = self.ltv.layerTreeModel()
-    self.ltgRoot = QgsProject.instance().layerTreeRoot()
-    self.msgBar = iface.messageBar()
-    self.legendTMS = LegendTMS( 'Catalog OTF' )
-    self.legendRaster = LegendRaster( 'Catalog OTF' )
-
-    self._initThread()
-
-    connecTableCOTF()
-    self.model.dataChanged.connect( self.dataChanged )
-    QgsMapLayerRegistry.instance().layersWillBeRemoved.connect( self.layersWillBeRemoved ) # Catalog layer removed
-
-    self.layer = self.layerName = self.nameFieldSource = self.nameFieldDate = None
-    self.ltgCatalog = self.ltgCatalogName = self.visibleSourceLayers = self.hasCanceled = None
-
-  def __del__(self):
-    self._finishThread()
-    del self.legendTMS
-    del self.legendRaster
-    QgsMapLayerRegistry.instance().layersWillBeRemoved.disconnect( self.layersWillBeRemoved ) # Catalog layer removed
-
-  def _initThread(self):
-    self.thread = QThread( self )
-    self.thread.setObjectName( "QGIS_Plugin_%s" % NAME_PLUGIN.replace( ' ', '_' ) )
-    self.worker = WorkerPopulateGroup( self.addLegendLayerWorker )
-    self.worker.moveToThread( self.thread )
-    self._connectWorker()
-
-  def _finishThread(self):
-    self._connectWorker( False )
-    self.worker.deleteLater()
-    self.thread.wait()
-    self.thread.deleteLater()
-    self.thread = self.worker = None
-
-  def _connectWorker(self, isConnect = True):
-    ss = [
-      { 'signal': self.thread.started, 'slot': self.worker.run },
-      { 'signal': self.worker.finished, 'slot': self.finishedPG },
-      { 'signal': self.worker.messageStatus, 'slot': self.messageStatusPG },
-      { 'signal': self.worker.messageError, 'slot': self.messageErrorPG }
-    ]
-    if isConnect:
-      for item in ss:
-        item['signal'].connect( item['slot'] )  
-    else:
-      for item in ss:
-        item['signal'].disconnect( item['slot'] )
-
-  def addLegendLayerWorker(self, layer):
-    if layer.type() == QgsMapLayer.RasterLayer:  
-      metadata = layer.metadata()
-      if metadata.find( "GDAL provider" ) != -1:
-        if  metadata.find( "OGC Web Map Service" ) != -1:
-          if self.legendTMS.hasTargetWindows( layer ):
-            self.legendTMS.setLayer( layer )
-        else:
-          self.legendRaster.setLayer( layer )
-
-  def run(self):
-    self.hasCanceled = False # Check in finishedPG
-
-    if self.thread.isRunning():
-      self.worker.kill()
-      self.hasCanceled = True
-      msgtrans = QCoreApplication.translate("CatalogOTF", "Canceled search for image from layer %s")
-      msg = msgtrans % self.layerName  
-      self.msgBar.pushMessage( NAME_PLUGIN, msg, QgsMessageBar.WARNING, 2 )
-      self.changedTotal.emit( self.layer.id(), "Canceling processing")
-      self.killed.emit( self.layer.id() )
-      return
-
-    if self.layer is None:
-      msgtrans = QCoreApplication.translate("CatalogOTF", "Need define layer catalog")
-      self.msgBar.pushMessage( NAME_PLUGIN, msgtrans, QgsMessageBar.WARNING, 2 )
-      return
-
-    self._setGroupCatalog()
-    self.ltgCatalogName = self.ltgCatalog.name()
-
-    renderFlag = self.canvas.renderFlag()
-    if renderFlag:
-      self.canvas.setRenderFlag( False )
-      self.canvas.stopRendering()
-
-    self._populateGroupCatalog()
-
-    if renderFlag:
-      self.canvas.setRenderFlag( True )
-      self.canvas.refresh()
-
-  def _populateGroupCatalog(self):
-
-    def getSourceVisibleLayers():
-      def hasVisibleRaster( ltl ):
-        return ltl.isVisible() == Qt.Checked and ltl.layer().type() == QgsMapLayer.RasterLayer
-      l_ltlVisible = filter( lambda item: hasVisibleRaster( item ), self.ltgCatalog.findLayers() )
-      return map( lambda item: item.layer().source(),  l_ltlVisible )
-
-    def runWorker():
-      data = {}
-      data['nameFieldDate'] = self.nameFieldDate
-      data['nameFieldSource'] = self.nameFieldSource
-      data['layer'] = self.layer
-      data['ltgCatalog'] = self.ltgCatalog
-      self.worker.setData( data )
-      self.thread.start()
-      #self.worker.run() # DEBUG
-
-    self.visibleSourceLayers = getSourceVisibleLayers()
-    self.ltgCatalog.removeAllChildren()
-    runWorker() # See finishPG
-
-  def _setGroupCatalog(self):
-    self.ltgCatalogName = "%s - Catalog" % self.layer.name()
-    self.ltgCatalog = self.ltgRoot.findGroup( self.ltgCatalogName  )
-    if self.ltgCatalog is None:
-      self.ltgCatalog = self.ltgRoot.addGroup( self.ltgCatalogName )
-
-  @pyqtSlot( bool )
-  def finishedPG(self, isKilled ):
-    def setSourceVisibleLayers():
-      l_ltlVisible = filter( lambda item: item.layer().source() in self.visibleSourceLayers, self.ltgCatalog.findLayers() )
-      map( lambda item: item.setVisible( Qt.Checked ),  l_ltlVisible )
-
-    self.thread.quit()
-    
-    if not self.layer is None:
-      self.changedIconRun.emit( self.layer.id(), self.layer.selectedFeatureCount() > 0 )
-      if self.hasCanceled:
-        self.changedTotal.emit( self.layer.id(), '0')
-      else:
-        setSourceVisibleLayers()
-
-    del self.visibleSourceLayers[:]
-
-  @pyqtSlot( str )
-  def messageStatusPG(self, msg):
-    self.changedTotal.emit( self.layer.id(), msg  )
-
-  @pyqtSlot( str )
-  def messageErrorPG(self, msg):
-    self.msgBar.pushMessage( NAME_PLUGIN, msg, QgsMessageBar.CRITICAL, 8 )
-
-  @pyqtSlot( 'QModelIndex', 'QModelIndex' )
-  def dataChanged(self, idTL, idBR):
-    if idTL != idBR:
-      return
-
-    if not self.ltgCatalog is None and self.ltgCatalog == self.model.index2node( idBR ):
-      name = self.ltgCatalog.name()
-      if self.ltgCatalogName != name:
-        self.ltgCatalogName = name
-        return
-
-    if not self.layer is None and self.ltgRoot.findLayer( self.layer.id() ) == self.model.index2node( idBR ):
-      name = self.layer.name()
-      if self.layerName != name:
-        self.changedNameLayer.emit( self.layer.id(), name )
-        self.layerName = name
-
-  @pyqtSlot( list )
-  def layersWillBeRemoved(self, layerIds):
-    if self.layer is None:
-      return
-    if self.layer.id() in layerIds:
-      self.removedLayer.emit( self.layer.id() )
-      self.removeLayerCatalog()
-
-  @staticmethod
-  def getNameFieldsCatalog(layer):
-
-    def getFirstFeature():
-      f = QgsFeature()
-      #
-      fr = QgsFeatureRequest() # First FID can be 0 or 1 depend of provider type
-      it = layer.getFeatures( fr )
-      isOk = it.nextFeature( f )
-      it.close()
-      #
-      if not isOk or not f.isValid():
-        del f
-        return None
-      else:
-        return f
-
-    def hasAddress(feature, nameField):
-
-      def asValidUrl( url):
-        isOk = True
-        try:
-          urllib2.urlopen(url)
-        except urllib2.HTTPError, e:
-          isOk = False
-        except urllib2.URLError, e:
-          isOk = False
-        #
-        return isOk  
-
-      value = feature.attribute( nameField )
-      if value is None or type(value) == QPyNullVariant:
-        return False
-
-      isUrl = value.find('http://') == 0 or value.find('https://') == 0
-      lenSource = len( value )
-      isUrl = isUrl and value.rfind( 'xml', lenSource - len( 'xml' ) ) == lenSource - len( 'xml' )   
-      if isUrl:
-        return asValidUrl( value )
-      #
-      fileInfo = QFileInfo( value )
-      return fileInfo.isFile()
-
-    def hasDate(feature, nameField):
-      value = feature.attribute( nameField )
-      if value is None or type(value) == QPyNullVariant:
-        return False
-      
-      date = value if type( value) is QDate else QDate.fromString( value, 'yyyy-MM-dd' )
-                
-      return True if date.isValid() else False
-
-    if layer is None or layer.type() != QgsMapLayer.VectorLayer or layer.geometryType() != QGis.Polygon:
-      return None
-
-    firstFeature = getFirstFeature()
-    if firstFeature is None:
-      return None
-
-    fieldSource = None
-    fieldDate = None
-    isOk = False
-    for item in layer.pendingFields().toList():
-      nameField = item.name()
-      if item.type() == QVariant.String:
-        if fieldSource is None and hasAddress( firstFeature, nameField ):
-          fieldSource = nameField
-        elif fieldDate is None and hasDate( firstFeature, nameField ):
-          fieldDate = nameField
-      elif item.type() == QVariant.Date:
-        if fieldDate is None and hasDate( firstFeature, nameField ):
-          fieldDate = nameField
-    if not fieldSource is None:
-      isOk = True
-
-    return { 'nameSource': fieldSource, 'nameDate': fieldDate } if isOk else None 
-
-  def setLayerCatalog(self, layer, nameFiedlsCatalog):
-    self.layer = layer
-    self.layerName = layer.name()
-    self.nameFieldSource = nameFiedlsCatalog[ 'nameSource' ]
-    self.nameFieldDate = nameFiedlsCatalog[ 'nameDate' ]
-    self.settedLayer.emit( self.layer )
-
-  def removeLayerCatalog(self):
-    self.ltgRoot.removeChildNode( self.ltgCatalog )
-    self.ltgCatalog = None
-    self.layer = self.nameFieldSource = self.nameFieldDate =  None
-
-
-class TableCatalogOTF(QObject):
-
-  runCatalog = pyqtSignal( str )
-
-  def __init__(self):
-    def initGui():
-      self.tableWidget.setWindowTitle("Catalog OTF")
-      self.tableWidget.setSortingEnabled( False )
-      msgtrans = QCoreApplication.translate("CatalogOTF", "Layer,Total")
-      headers = msgtrans.split(',')
-      self.tableWidget.setColumnCount( len( headers ) )
-      self.tableWidget.setHorizontalHeaderLabels( headers )
-      self.tableWidget.resizeColumnsToContents()
-
-    super( TableCatalogOTF, self ).__init__()
-    self.tableWidget = QTableWidget()
-    initGui()
-
-  def _getRowLayerID(self, layerID):
-    for row in range( self.tableWidget.rowCount() ):
-      if layerID == self.tableWidget.cellWidget( row, 0 ).objectName():
-        return row
-    return -1
-
-  def _changedText(self, layerID, name, column):
-    row = self._getRowLayerID( layerID )
-    if row != -1:
-      wgt = self.tableWidget.cellWidget( row, column ) if column == 0 else self.tableWidget.item( row, column )
-      wgt.setText( name )
-      wgt.setToolTip( name )
-      self.tableWidget.resizeColumnsToContents()
-
-  @pyqtSlot()
-  def _onRunCatalog(self):
-    btn = self.sender()
-    icon = QIcon( joinPath( dirname(__file__), 'cancel_red.svg' ) )
-    btn.setIcon( icon )
-    layerID = btn.objectName() 
-    self.runCatalog.emit( layerID )
-
-  @pyqtSlot()  
-  def _onSelectionChanged(self):
-    layer = self.sender()
-    row = self._getRowLayerID( layer.id() )
-    if row != -1:
-      wgt = self.tableWidget.cellWidget( row, 0 )
-      nameIcon = 'check_green.svg' if layer.selectedFeatureCount() == 0 else 'check_yellow.svg'
-      icon = QIcon( joinPath( dirname(__file__), nameIcon ) )
-      wgt.setIcon( icon )
-
-  @pyqtSlot( "QgsVectorLayer")
-  def insertRow(self, layer):
-    row = self.tableWidget.rowCount()
-    self.tableWidget.insertRow( row )
-
-    column = 0 # Layer
-    layerName = layer.name()
-    nameIcon = 'check_green.svg' if layer.selectedFeatureCount() == 0 else 'check_yellow.svg'
-    icon = QIcon( joinPath( dirname(__file__), nameIcon ) )
-    btn = QPushButton( icon, layerName, self.tableWidget )
-    btn.setObjectName( layer.id() )
-    btn.setToolTip( layerName )
-    btn.clicked.connect( self._onRunCatalog )
-    layer.selectionChanged.connect( self._onSelectionChanged )
-    self.tableWidget.setCellWidget( row, column, btn )
-
-    column = 1 # Total
-
-    msgtrans = QCoreApplication.translate("CatalogOTF", "None")
-    item = QTableWidgetItem( msgtrans )
-    item.setFlags( Qt.ItemIsSelectable | Qt.ItemIsEnabled )
-    self.tableWidget.setItem( row, column, item )
-
-    self.tableWidget.resizeColumnsToContents()
-
-  @pyqtSlot( str )
-  def removeRow(self, layerID):
-    row = self._getRowLayerID( layerID )
-    if row != -1:
-      self.tableWidget.removeRow( row )
-
-  @pyqtSlot( str, str )
-  def changedNameLayer(self, layerID, name):
-    self._changedText( layerID, name, 0 )
-
-  @pyqtSlot( str, str )
-  def changedTotal(self, layerID, value):
-    self._changedText( layerID, value, 1 )
-
-  @pyqtSlot( str, bool )
-  def changedIconRun(self, layerID, selected):
-    row = self._getRowLayerID( layerID )
-    if row != -1:
-      btn = self.tableWidget.cellWidget( row, 0 )
-      nameIcon = 'check_green.svg' if not selected else 'check_yellow.svg'
-      icon = QIcon( joinPath( dirname(__file__), nameIcon ) )
-      btn.setIcon( icon )
-      btn.setEnabled( True )
-
-  @pyqtSlot( str )
-  def killed(self, layerID):
-    row = self._getRowLayerID( layerID )
-    if row != -1:
-      btn = self.tableWidget.cellWidget( row, 0 )
-      btn.setEnabled( False )
-
-  def widget(self):
-    return self.tableWidget
-
+from qgis.gui import QgsMessageBar
 
 class DockWidgetCatalogOTF(QDockWidget):
+    runCatalog  = pyqtSignal(bool, list)
+    findCatalog = pyqtSignal()
+    def __init__(self, iface):
+        def setupUi():
+            self.setObjectName('catalogotf_dockwidget')
+            wgt = QWidget( self )
+            wgt.setAttribute(Qt.WA_DeleteOnClose)
+            #
+            self.table = QTableWidget(wgt)
+            self.table.setSortingEnabled( False )
+            self.table.setColumnCount( 1 )
+            self.table.itemSelectionChanged.connect( self.selectionChangedTable )
+            #
+            self.headerTable = QCoreApplication.translate('CatalogOTF', 'Layers({}) - Features')
+            self.labelRun = QCoreApplication.translate('CatalogOTF', 'Run({} selected)')
+            self.labelCancel = QCoreApplication.translate('CatalogOTF', 'Cancel({} selected)')
+            self.tooltipRow = QCoreApplication.translate('CatalogOTF', 'Fields: Source({}) and Date({})')
+            labelFind = QCoreApplication.translate('CatalogOTF', 'Find catalog')
+            #
+            self.table.setHorizontalHeaderLabels( [ self.headerTable.format( 0 ) ] )
+            label = QCoreApplication.translate('CatalogOTF', 'Click select all / CTRL+Click unselect all')
+            self.table.horizontalHeaderItem(0).setData( Qt.ToolTipRole, label )
+            self.table.resizeColumnsToContents()
+            #
+            label = self.labelRun.format( 0 )
+            self.btnRunCancel = QPushButton( label, wgt )
+            self.btnRunCancel.setEnabled( False )
+            self.btnRunCancel.clicked.connect( self.run )
+            #
+            self.btnFind = QPushButton( labelFind, wgt )
+            self.btnFind.clicked.connect( self.find )
+            #
+            mainLayout = QVBoxLayout()
+            mainLayout.addWidget( self.table )
+            lyt = QHBoxLayout()
+            lyt.addWidget( self.btnRunCancel )
+            lyt.addWidget( self.btnFind )
+            mainLayout.addItem( lyt )
+            wgt.setLayout( mainLayout )
+            #
+            self.setWidget( wgt )
+            self.isProcessing = False #  Change in 'enableProcessing'
 
-  def __init__(self, iface):
+        super().__init__('Catalog OTF', iface.mainWindow() )
+        setupUi()
+        self.process = ProcessCatalogOTF( self, iface )
 
-    def setupUi():
-      self.setObjectName( "catalogotf_dockwidget" )
-      wgt = QWidget( self )
-      wgt.setAttribute(Qt.WA_DeleteOnClose)
-      #
-      gridLayout = QGridLayout( wgt )
-      gridLayout.setContentsMargins( 0, 0, gridLayout.verticalSpacing(), gridLayout.verticalSpacing() )
-      #
-      tbl = self.tbl_cotf.widget()
-      ( iniY, iniX, spanY, spanX ) = ( 0, 0, 1, 2 )
-      gridLayout.addWidget( tbl, iniY, iniX, spanY, spanX )
-      #
-      msgtrans = QCoreApplication.translate("CatalogOTF", "Find catalog")
-      btnFindCatalogs = QPushButton( msgtrans, wgt )
-      btnFindCatalogs.clicked.connect( self.findCatalogs )
-      ( iniY, iniX, spanY, spanX ) = ( 1, 0, 1, 1 )
-      gridLayout.addWidget( btnFindCatalogs, iniY, iniX, spanY, spanX )
-      #
-      wgt.setLayout( gridLayout )
-      self.setWidget( wgt )
+    def __del__(self):
+        del self.process
 
-    super( DockWidgetCatalogOTF, self ).__init__( "Catalog On The Fly", iface.mainWindow() )
-    #
-    self.iface = iface
-    self.cotf = {} 
-    self.tbl_cotf = TableCatalogOTF()
-    self.tbl_cotf.runCatalog.connect( self._onRunCatalog )
-    #
-    setupUi()
+    def getLayerIds(self, selected=False):
+        rows = map( lambda item: item.row(), self.table.selectedItems() ) if selected else \
+               range( self.table.rowCount() )
+        vreturn = {}
+        for row in rows:
+            layerId = self.table.verticalHeaderItem( row ).data( Qt.UserRole )['layerId']
+            vreturn[ layerId ] = row
+        return vreturn
 
-  @pyqtSlot( str )
-  def _onRunCatalog(self, layerID):
-    if layerID in self.cotf.keys(): # Maybe Never happend
-      self.cotf[ layerID ].run()
-  
-  @pyqtSlot( str )
-  def removeLayer(self, layerID):
-    self.cotf[ layerID ].worker.kill()
-    del self.cotf[ layerID ]
+    def getNameLayer(self, row):
+        return self.table.verticalHeaderItem( row ).text()
 
-  @pyqtSlot()
-  def findCatalogs(self):
-    def addLegendImages(layer):
-     name = "%s - Catalog" % layer.name()
-     ltgCatalog = QgsProject.instance().layerTreeRoot().findGroup( name  )
-     if not ltgCatalog is None:
-      for item in map( lambda item: item.layer(), ltgCatalog.findLayers() ):
-        self.cotf[ layerID ].addLegendLayerWorker( item )
+    def setNameLayer(self, row, name):
+        item = self.table.verticalHeaderItem( row )
+        item.setText( name  )
+        self.table.setVerticalHeaderItem( row, item )
 
-    def checkTempDir():
-      tempDir = QDir( WorkerPopulateGroup.TEMP_DIR )
-      if not tempDir.exists():
-        msgtrans1 = QCoreApplication.translate("CatalogOTF", "Created temporary directory '%s' for GDAL_WMS")
-        msgtrans2 = QCoreApplication.translate("CatalogOTF", "Not possible create temporary directory '%s' for GDAL_WMS")
-        isOk = tempDir.mkpath( WorkerPopulateGroup.TEMP_DIR )
-        msgtrans = msgtrans1 if isOk else msgtrans2
-        tempDir.setPath( WorkerPopulateGroup.TEMP_DIR )
-        msg = msgtrans % tempDir.absolutePath()
-        msgBar.pushMessage( NAME_PLUGIN, msg, QpluginNamegsMessageBar.CRITICAL, 5 )
+    def getNameFields(self, row):
+        return {
+            'fieldSource': self.table.verticalHeaderItem( row ).data( Qt.UserRole )['fieldSource'],
+            'fieldDate': self.table.verticalHeaderItem( row ).data( Qt.UserRole )['fieldDate'],
+        }
 
-    def overrideCursor():
-      cursor = QApplication.overrideCursor()
-      if cursor is None or cursor == 0:
-          QApplication.setOverrideCursor( QCursor( Qt.WaitCursor ) )
-      elif cursor.shape() != Qt.WaitCursor:
-          QApplication.setOverrideCursor( QCursor( Qt.WaitCursor ) )
+    def setFontItem(self, item, isProcessing=False):
+        font = item.font()
+        font.setItalic( isProcessing )
+        font.setBold( isProcessing )
+        item.setFont( font )
 
-    overrideCursor()
-    find = False
-    f = lambda item: \
-        item.type() == QgsMapLayer.VectorLayer and \
-        item.geometryType() == QGis.Polygon and \
-        not item.id() in self.cotf.keys()
-    for item in filter( f, self.iface.legendInterface().layers() ):
-      nameFiedlsCatalog = CatalogOTF.getNameFieldsCatalog( item )
-      if not nameFiedlsCatalog is None:
-        layerID = item.id()
-        self.cotf[ layerID ] = CatalogOTF( self.iface, self.tbl_cotf )
-        self.cotf[ layerID ].removedLayer.connect( self.removeLayer )
-        self.cotf[ layerID ].setLayerCatalog( item, nameFiedlsCatalog ) # Insert table
-        addLegendImages( item )
-        find = True
-    #
-    msgBar = self.iface.messageBar()
-    if not find:
-      f = lambda item: \
-          item.type() == QgsMapLayer.VectorLayer and \
-          item.geometryType() == QGis.Polygon
-      totalLayers = len( filter( f, self.iface.legendInterface().layers() ) )
-      msgtrans = QCoreApplication.translate("CatalogOTF", "Did not find a new catalog. Catalog layers %d of %d(polygon layers)")
-      msg = msgtrans % ( len( self.cotf ), totalLayers ) 
-      msgBar.pushMessage( NAME_PLUGIN, msg, QgsMessageBar.INFO, 3 )
-    else:
-      checkTempDir()
+    def getIconLabel(self, layer):
+        if layer.selectedFeatureCount() > 0:
+            icon = 'check_yellow.svg'
+            label = QCoreApplication.translate('CatalogOTF', '{} Selected')
+            label = label.format( layer.selectedFeatureCount() )
+        else:
+            icon = 'check_green.svg'
+            label = QCoreApplication.translate('CatalogOTF', '{} Total')
+            label = label.format( layer.featureCount() )
+        return icon, label
 
-    QApplication.restoreOverrideCursor()
+    def setLayerItem(self, layer, row):
+        icon, label = self.getIconLabel( layer )
+        icon = QIcon( joinPath( dirname(__file__), icon ) )
+        item = self.table.verticalHeaderItem( row )
+        self.setFontItem( item )
+        item.setIcon( icon )
+        #
+        item = self.table.item( row, 0 ) # idCol = 0
+        self.setFontItem( item )
+        item.setText( label )
+        self.table.resizeColumnsToContents()
+
+    def setLayerItemProcessing(self, layer, row, labelStatus, totalInView=None):
+        item = self.table.verticalHeaderItem( row )
+        self.setFontItem( item, True )
+        if totalInView is None:
+            icon, label = self.getIconLabel( layer )
+            label = "{} - {}".format( label, labelStatus )
+        else:
+            label = QCoreApplication.translate('CatalogOTF', '{} in View - Running...')
+            label = label.format( totalInView )
+        item = self.table.item( row, 0 ) # idCol = 0
+        self.setFontItem( item, True )
+        item.setText( label )
+        self.table.resizeColumnsToContents()
+
+    def insertLayer(self, layer, fieldSource, fieldDate):
+        row = self.table.rowCount()
+        self.table.insertRow( row )
+        # Header Column
+        self.table.setHorizontalHeaderLabels( [ self.headerTable.format( self.table.rowCount() ) ] )
+        # Header Line
+        item = QTableWidgetItem( layer.name() )
+        item.setFlags( Qt.ItemIsEnabled )
+        data = { 'layerId': layer.id(), 'fieldSource': fieldSource, 'fieldDate': fieldDate }
+        item.setData( Qt.UserRole, data )
+        label = self.tooltipRow.format( fieldSource, fieldDate )
+        item.setData( Qt.ToolTipRole, label )
+        self.table.setVerticalHeaderItem( row, item )
+        # Total
+        item = QTableWidgetItem()
+        item.setFlags( Qt.ItemIsSelectable | Qt.ItemIsEnabled )
+        self.table.setItem( row, 0, item ) # idCol = 0
+        # Layer(name and total)
+        self.setLayerItem( layer, row )
+
+    def removeLayers(self, rows):
+        rows.sort(reverse=True)
+        for row in rows:
+            self.table.removeRow( row  )
+        self.table.setHorizontalHeaderLabels( [ self.headerTable.format( self.table.rowCount() ) ] )
+
+    def enableProcessing(self, isProcessing):
+        label = self.labelCancel if isProcessing else self.labelRun
+        total = len( self.table.selectedItems() )
+        label = label.format( total )
+        self.btnRunCancel.setText( label )
+        self.btnFind.setEnabled( not isProcessing )
+        self.table.setEnabled( not isProcessing )
+        self.isProcessing = isProcessing
+
+    @pyqtSlot()
+    def selectionChangedTable(self):
+        total = len( self.table.selectedItems() )
+        if self.isProcessing:
+            label = self.labelCancel.format( total )
+        else:
+            label = self.labelRun.format( total )
+            self.btnRunCancel.setEnabled( total > 0 )
+        self.btnRunCancel.setText( label )
+
+    @pyqtSlot( bool )
+    def run(self, checked):
+        if not self.isProcessing:
+            items = self.table.selectedItems()
+            if len( items) == 0:
+                return
+            f = lambda item: self.table.verticalHeaderItem( item.row() ).data( Qt.UserRole )['layerId']
+            layerIds = [ f( item ) for item in items ]
+        else:
+           layerIds = [] 
+        self.runCatalog.emit( self.isProcessing, layerIds  )
+
+    @pyqtSlot( bool )
+    def find(self, checked):
+        self.findCatalog.emit()
+
+class ProcessCatalogOTF(QObject):
+    TEMP_DIR = '/tmp/catalogotf_gdal_wms'
+    formatQDate = 'yyyy-MM-dd'
+
+    @staticmethod
+    def isUrl(value):
+        # Start 'http://' or 'https://' and finished '.xml'
+        isUrl = value.find('http://') == 0 or value.find('https://') == 0
+        return isUrl and value[-4:] == '.xml'
+
+    @staticmethod
+    def existsUrl(url, getResponse=False):
+        isOk = True
+        try:
+            response = urllib.request.urlopen( url )
+        except urllib.error.HTTPError:
+            isOk, response = False, None
+        except urllib.error.URLError:
+            isOk, response = False, None
+        return isOk if not getResponse else ( isOk, response )
+
+    def __init__(self, widget, iface):
+        super().__init__()
+        self.widget = widget
+        self.msgBar = iface.messageBar()
+        self.namePlugin = 'Catalog OTF'
+        self.project = QgsProject.instance()
+        self.taskManager = QgsApplication.taskManager()
+        self.ltgRoot = self.project.layerTreeRoot()
+        #
+        self.nameCatalog = 'Catalogs OTF'
+        TaskCatalogOTF.iface = iface
+        self.totalRunning = 0
+        self.totalFinish = 0
+        self.msgUseDir_gdal_wms = None
+        #
+        self.widget.runCatalog.connect( self.run )
+        self.widget.findCatalog.connect( self.find )
+        self.project.layerWillBeRemoved.connect( self.removeLayer )
+        self.taskManager.statusChanged.connect( self.statusProcessing )
+
+    @pyqtSlot(str)
+    def addTreeGroupTask(self, name ):
+        task = self.sender()
+        task.resultSlot = task.ltgSlot.addGroup( name )
+
+    @pyqtSlot()
+    def addLayerNoLegendTask(self):
+        task = self.sender()
+        task.resultSlot = self.project.addMapLayer( task.layerSlot, addToLegend=False )
+
+    @pyqtSlot(str, str)
+    def createRasterTask(self, source, name):
+        task = self.sender()
+        task.resultSlot = QgsRasterLayer( source, name )
+
+    @pyqtSlot()
+    def addRasterTreeGroupTask(self):
+        task = self.sender()
+        task.ltgSlot.addLayer( task.layerSlot )
+        task.resultSlot = True
+
+    @pyqtSlot('long', int)
+    def statusProcessing(self, taskid, status):
+        def getLabelStatus():
+            if status in ( QgsTask.Queued, QgsTask.OnHold ):
+                label = QCoreApplication.translate('CatalogOTF', 'Waiting...')
+            elif status == QgsTask.Running:
+                label = QCoreApplication.translate('CatalogOTF', 'Running...')
+            elif status == QgsTask.Complete:
+                label = QCoreApplication.translate('CatalogOTF', 'Finished.')
+                self.totalFinish += 1
+            elif status == QgsTask.Terminated:
+                label = QCoreApplication.translate('CatalogOTF', 'Canceled')
+                self.totalFinish += 1
+            else:
+                label = 'Not status'
+            return label
+
+        def setLabelProcessing(label):
+            rowTable = layerIdsTable[ task.layer.id() ]
+            self.widget.setLayerItemProcessing( task.layer, rowTable, label)
+
+        def setLabelFinishAll():
+            for layerId in layerIdsTable.keys():
+                layer = self.ltgRoot.findLayer( layerId ).layer()
+                rowTable = layerIdsTable[ layerId ]
+                self.widget.setLayerItem( layer, rowTable )
+
+        task = self.taskManager.task( taskid )
+        if not type(task) is TaskCatalogOTF:
+            return
+        if status == QgsTask.Complete and task.countError > 0:
+            msg = QCoreApplication.translate('CatalogOTF', '{} - Total of errors: {}')
+            msg = msg.format( task.layer.name(), task.countError )
+            self.msgBar.pushMessage( self.namePlugin , msg, Qgis.Warning, 4 )
+        label = getLabelStatus() # Count totalFinish
+        layerIdsTable = self.widget.getLayerIds(True)
+        if self.totalFinish == self.totalRunning:
+            setLabelFinishAll()
+            self.widget.enableProcessing(False)
+        else:
+            setLabelProcessing( label )
 
 
-class ProjectDockWidgetCatalogOTF():
+    @pyqtSlot(int)
+    def statusFoundFeatures(self, totalInView):
+        task = self.sender()
+        layerIdsTable = self.widget.getLayerIds(True)
+        rowTable = layerIdsTable[ task.layer.id() ]
+        label = QCoreApplication.translate('CatalogOTF', 'Running...')
+        self.widget.setLayerItemProcessing( task.layer, rowTable, label, totalInView )
 
-  pluginName = "Plugin_DockWidget_Catalog_OTF"
-  pluginSetting = "/images_wms"
-  nameTmpDir = "tmp"
+    @pyqtSlot(str, int)
+    def messageStatus(self, message, level ):
+        self.msgBar.pushMessage( self.namePlugin , message, level, 4 )
 
-  def __init__(self, iface):
-    self.iface = iface
+    @pyqtSlot(str, str)
+    def messageLog(self, message, tag):
+        QgsMessageLog.logMessage( message, tag, Qgis.Warning )
 
-  @pyqtSlot("QDomDocument")
-  def onReadProject(self, document):
-    def createTmpDir():
-      tmpDir = "%s%s" % ( sepPath, self.nameTmpDir )
-      if not isdir( tmpDir ):
-        makedirs( tmpDir )
+    @pyqtSlot(bool, list)
+    def run(self, isProcessing, layerIds):
+        def _run():
+            def getRootCatalog():
+                ltgRootCatalog = self.ltgRoot.findGroup( self.nameCatalog )
+                if ltgRootCatalog is None:
+                    ltgRootCatalog = self.ltgRoot.addGroup( self.nameCatalog )
+                else:
+                    ltgRootCatalog.removeAllChildren()
+                return ltgRootCatalog
 
-    proj = QgsProject.instance()
-    value, ok = proj.readEntry( self.pluginName, self.pluginSetting )
-    if ok and bool( value ):
-      createTmpDir()
-      newImages = 0
-      for item in json.loads( value ):
-        source = item['source']
-        if not QFileInfo( source ).exists():
-          fw = open( source, 'w' )
-          fw.write( item[ 'wms' ] )
-          fw.close()
-          newImages += 1
-      if newImages > 0:
-        msgtrans = QCoreApplication.translate( "CatalogOTF", "Please reopen project - DON'T SAVE. The GDAL_WMS images were regenerated (%d images)" )
-        msg = msgtrans % newImages
-        self.iface.messageBar().pushMessage( NAME_PLUGIN, msg, QgsMessageBar.WARNING, 8 )
+            self.widget.enableProcessing( True ) # Set value isProcessing in self.widget
+            ltgRootCatalog = getRootCatalog()
+            layerIdsTable = self.widget.getLayerIds(True)
+            self.totalFinish, self.totalRunning = 0, len( layerIds )
+            for layerId in layerIds:
+                rowTable = layerIdsTable[ layerId ]
+                nameFields = self.widget.getNameFields( rowTable )
+                data = {
+                    'layer':              self.ltgRoot.findLayer( layerId ).layer(),
+                    'ltgCatalog':         ltgRootCatalog.addGroup( self.widget.getNameLayer( rowTable) ),
+                    'fieldSource':        nameFields['fieldSource'],
+                    'fieldDate':          nameFields['fieldDate'],
+                    'addTreeGroup':       self.addTreeGroupTask,
+                    'addLayerNoLegend':  self.addLayerNoLegendTask,
+                    'createRaster':       self.createRasterTask,
+                    'addRasterTreeGroup': self.addRasterTreeGroupTask,
+                }
+                task = TaskCatalogOTF( data )
+                task.messageLog.connect( self.messageLog )
+                task.messageStatus.connect( self.messageStatus )
+                task.foundFeatures.connect( self.statusFoundFeatures )
+                self.taskManager.addTask( task )
 
-  @pyqtSlot("QDomDocument")
-  def onWriteProject(self, document):
-    def getContentFile( source ):
-      with open( source, 'r' ) as content_file:
-        content = content_file.read()
-      return content
+        def _stop():
+            msg = QCoreApplication.translate('CatalogOTF', 'Cancelled by user')
+            self.msgBar.clearWidgets()
+            self.msgBar.pushMessage( self.namePlugin , msg, Qgis.Warning, 4 )
+            self.taskManager.cancelAll() # # Set value isProcessing in 'statusProcessing'(all finished)
 
-    def filter_wms_tmp( layer ):
-      if not layer.type() == QgsMapLayer.RasterLayer:
-        return False
+        _stop() if isProcessing else _run()
 
-      metadata = layer.metadata()
-      if not ( metadata.find( "GDAL provider" ) != -1 and metadata.find( "OGC Web Map Service" ) != -1  ):
-        return False
+    @pyqtSlot()
+    def find(self):
+        def overrideCursor():
+            cursor = QApplication.overrideCursor()
+            if cursor is None or cursor == 0:
+                QApplication.setOverrideCursor( QCursor( Qt.WaitCursor ) )
+            elif cursor.shape() != Qt.WaitCursor:
+                QApplication.setOverrideCursor( QCursor( Qt.WaitCursor ) )
 
-      lstDir = dirname( layer.source() ).split( sepPath)
-      if not ( len( lstDir) == 2 and lstDir[1] == self.nameTmpDir ):
-        return False
-      
-      return True
+        def getNameFieldsCatalog(Layer):
+            def getFirstFeature():
+                f = QgsFeature()
+                #
+                it = layer.getFeatures() # First FID can be 0 or 1 depend of provider type
+                isOk = it.nextFeature( f )
+                it.close()
+                #
+                if not isOk or not f.isValid():
+                    del f
+                    return { 'isOk': False }
+                else:
+                    return { 'isOk': True, 'feature': f }
 
-    layers = map ( lambda item: item.layer(), self.iface.layerTreeView().layerTreeModel().rootGroup().findLayers() )
-    layers_wms_tmp = filter( filter_wms_tmp, layers )
-    images_wms = []
-    for item in layers_wms_tmp:
-      source = item.source()
-      images_wms.append( { 'source': source, 'wms': getContentFile( source) } )
-    proj = QgsProject.instance()
-    if len( images_wms ) == 0:
-      proj.removeEntry( self.pluginName, self.pluginSetting )
-    else:
-      proj.writeEntry( self.pluginName, self.pluginSetting, json.dumps( images_wms ) )
+            def existsSource(value):
+                if self.isUrl( value ):
+                    isOk = self.existsUrl( value )
+                    if isOk:
+                        if not QDir( self.TEMP_DIR ).exists():
+                            QDir().mkdir( self.TEMP_DIR )
+                            msg = QCoreApplication.translate('CatalogOTF', 'Created diretory {}')
+                            self.msgUseDir_gdal_wms = msg.format( self.TEMP_DIR )
+                        else:
+                            msg = QCoreApplication.translate('CatalogOTF', 'Diretory {} for virtual raster(XML)' )
+                            self.msgUseDir_gdal_wms = msg.format( self.TEMP_DIR )
+
+                    return isOk
+
+                # File
+                fileInfo = QFileInfo( value )
+                return fileInfo.isFile()
+
+            def existsDate(value):
+                date = value if type( value ) is QDate else QDate.fromString( value, self.formatQDate )
+                return True if date.isValid() else False
+
+            fieldSource, fieldDate = None, None
+            vreturn = getFirstFeature()
+            if not vreturn['isOk']:
+                return { 'fieldSource': fieldSource, 'fieldDate': fieldDate }
+
+            feat = vreturn['feature']
+            for item in layer.fields().toList():
+                nameField = item.name()
+                value = feat.attribute( nameField )
+                if value is None or ( type(value) == QVariant and value.isNull() ):
+                    continue
+                if item.type() == QVariant.String:
+                    if fieldSource is None and existsSource( value ):
+                        fieldSource = nameField
+                    elif fieldDate is None and existsDate( value ):
+                        fieldDate = nameField
+                elif item.type() == QVariant.Date:
+                    if fieldDate is None and existsDate( value ):
+                        fieldDate = nameField
+            #
+            return { 'fieldSource': fieldSource, 'fieldDate': fieldDate }
+
+        overrideCursor()
+        self.msgUseDir_gdal_wms = None
+        total = 0
+        layerIds = self.widget.getLayerIds().keys()
+        f = lambda layer: \
+            not layer.id() in layerIds and \
+            layer.type() == QgsMapLayer.VectorLayer and \
+            layer.geometryType() == QgsWkbTypes.PolygonGeometry
+        layers = [ ltl.layer() for ltl in self.ltgRoot.findLayers() ]
+        for layer in filter( f, layers ):
+            r = getNameFieldsCatalog( layer )
+            if r['fieldSource'] is None:
+                continue
+            self.widget.insertLayer( layer, r['fieldSource'], r['fieldDate'] )
+            layer.selectionChanged.connect( self.selectionChangedLayer )
+            self.ltgRoot.findLayer( layer.id() ).nameChanged.connect( self.nameChanged )
+            total += 1
+
+        QApplication.restoreOverrideCursor()
+        self.msgBar.clearWidgets()
+        if total > 0:
+            msg = QCoreApplication.translate('CatalogOTF', 'Added {} layer(s)')
+            msg = msg.format( total )
+            if not self.msgUseDir_gdal_wms is None:
+                msg = "{}. {}".format( msg, self.msgUseDir_gdal_wms )
+            self.msgBar.pushMessage( self.namePlugin , msg, Qgis.Info, 4 )
+        else:
+            msg = QCoreApplication.translate('CatalogOTF', 'Not found a new catalog layer')
+            self.msgBar.pushMessage( self.namePlugin , msg, Qgis.Warning, 4 )
+
+    @pyqtSlot('QString')
+    def removeLayer(self, layerId):
+        layerIdsTable = self.widget.getLayerIds()
+        if not layerId in layerIdsTable.keys():
+            return
+        row = layerIdsTable[ layerId ]
+        self.widget.removeLayers( [ row ] )
+
+    @pyqtSlot('QgsFeatureIds', 'QgsFeatureIds', bool)
+    def selectionChangedLayer(self, selected, deselected, clearAndSelect):
+        if self.widget.isProcessing:
+            return
+        layer = self.sender()
+        layerId = layer.id()
+        layerIdsTable = self.widget.getLayerIds()
+        if layerId in layerIdsTable.keys():
+            self.widget.setLayerItem( layer, layerIdsTable[ layerId ] )
+   
+    @pyqtSlot('QgsLayerTreeNode*', 'QString')
+    def nameChanged(self, node, name):
+        # Change name layer in Table
+        if self.widget.isProcessing:
+            return
+        if node is None or not node.nodeType() == QgsLayerTreeNode.NodeLayer:
+            return
+        layerId = node.layer().id()
+        if layerId in self.widget.getLayerIds().keys():
+            layerIdsTable = self.widget.getLayerIds()
+            nameTable = self.widget.getNameLayer( layerIdsTable[ layerId ] )
+            if name != nameTable:
+                self.widget.setNameLayer( layerIdsTable[ layerId ], name )
+
+class TaskCatalogOTF(QgsTask):
+    iface = None
+    messageLog         = pyqtSignal(str, str)
+    messageStatus      = pyqtSignal(str, int)
+    foundFeatures      = pyqtSignal(int)
+    addTreeGroup       = pyqtSignal(str)
+    addLayerNoLegend   = pyqtSignal()
+    createRaster       = pyqtSignal(str, str)
+    addRasterTreeGroup = pyqtSignal()
+
+    def __init__(self, data ):
+         super().__init__('CatalogOTF', QgsTask.CanCancel )
+         self.project = QgsProject.instance()
+         self.layer = data['layer']
+         self.ltgCatalog = data['ltgCatalog']
+         self.fieldSource = data['fieldSource']
+         self.fieldDate = data['fieldDate']
+         self.canvas = self.iface.mapCanvas()
+         self.formatError = QCoreApplication.translate('CatalogOTF', "Error '{}'" )
+         self.countError = 0
+         self.totalFeatures = 0
+         self.setDependentLayers( [ self.layer] )
+
+         self.timeWait = {
+             'addTreeGroup': 2,
+             'addLayerNoLegend': 2,
+             'createRaster': 10,
+             'addRasterTreeGroup': 2
+         }
+         self.resultSlot, self.layerSlot, self.ltgSlot = None, None, None
+         self.addTreeGroup.connect( data['addTreeGroup'] )
+         self.addLayerNoLegend.connect( data['addLayerNoLegend'] )
+         self.createRaster.connect( data['createRaster'] )
+         self.addRasterTreeGroup.connect( data['addRasterTreeGroup'] )
+
+    def emitStatus(self, value, level):
+        msg = "{}: {}".format( self.layer.name(), value )
+        self.messageStatus.emit( msg, level )
+    
+    def emitError(self, value):
+        msg = self.formatError.format( value )
+        msg = "{}: {}".format( self.layer.name(), msg )
+        self.countError += 1
+        self.messageLog.emit( msg, self.description() )
+
+    def run(self):
+        def getImagesByCanvas():
+            def getFidsSpatialIndexIntersect():
+                isSelected = self.layer.selectedFeatureCount() > 0
+                rectLayer = self.layer.extent() if not isSelected else self.layer.boundingBoxOfSelected()
+                crsLayer = self.layer.crs()
+
+                crsCanvas = self.canvas.mapSettings().destinationCrs()
+                ct = QgsCoordinateTransform( crsCanvas, crsLayer, self.project )
+                rectCanvas = self.canvas.extent() if crsCanvas == crsLayer else ct.transform( self.canvas.extent() )
+
+                if not rectLayer.intersects( rectCanvas ):
+                    return { 'fids': None }
+
+                fr = QgsFeatureRequest()
+                if isSelected:
+                    fr.setFilterFids( self.layer.selectedFeatureIds() )
+                index = QgsSpatialIndex( self.layer.getFeatures( fr ) )
+                fids = index.intersects( rectCanvas )
+                del fr
+                del index
+                return { 'fids': fids, 'rectCanvas': rectCanvas }
+
+            def getImagesIntersect(fids, rectCarootnvas):
+                nfS, nfD = self.fieldSource, self.fieldDate
+                
+                if not self.fieldDate is None:
+                    getSourceDate = lambda feat: { 'source': feat[ nfS ], 'date': feat[ nfD ] }
+                    if self.layer.fields().field( nfD ).type() == QVariant.Date:
+                        getSourceDate = lambda feat: { 'source': feat[ nfS ], 'date': feat[ nfD ].toString( ProcessCatalogOTF.formatQDate ) }
+                getSource = lambda feat: { 'source': feat[ nfS ] }
+                
+                fr = QgsFeatureRequest()
+                fr.setFilterFids ( fids )
+                it = self.layer.getFeatures( fr ) 
+                feat = QgsFeature()
+                getAttributes = getSourceDate if not nfD is None else getSource
+                images = []
+                while it.nextFeature( feat ):
+                    if self.isCanceled():
+                        return { 'isOk': False }
+                    if feat.geometry().intersects( rectCanvas ):
+                        images.append( getAttributes( feat ) )
+
+                return { 'isOk': True, 'images': images }
+
+            r = getFidsSpatialIndexIntersect()
+            fids = r['fids']
+            if fids is None:
+                return { 'isOk': True, 'images': [] }
+            rectCanvas = r['rectCanvas']
+            r = getImagesIntersect( fids, rectCanvas )
+            if not r['isOk']:
+                return { 'isOk': False }
+            images = r['images']
+            del fids[:]
+
+            return { 'isOk': True, 'images': images }
+
+        def getInfoImages(images):
+            def getFileInfo( image ):
+                def prepareFileTMS( url_xml ):
+                    def createLocalFile():
+                        def existsServerUrl(docHtml):
+                            def isValueAttribute(node, name, value):
+                                atts = node.attributes()
+                                if atts.isEmpty() or not atts.contains(name):
+                                    return False
+                                v = atts.namedItem(name).firstChild().nodeValue()
+                                return v.upper() == value.upper()
+
+                            nodesService = docHtml.elementsByTagName('Service')
+                            if nodesService.isEmpty():
+                                return False
+                            nodeService = nodesService.item(0)
+                            if not isValueAttribute( nodeService, 'name', 'TMS' ):
+                                return False
+                            # Check url
+                            nodes = nodeService.toElement().elementsByTagName('ServerUrl')
+                            if nodes.isEmpty():
+                                return False
+                            node = nodes.item(0).firstChild()
+                            url_tms = node.nodeValue()
+                            idx = url_tms.index('/${z}/${x}/${y}')
+                            url = url_tms[:idx]
+                            return ProcessCatalogOTF.existsUrl( url )
+
+                        def populateLocalFile(docHtml):
+                            def setPath(newPath):
+                                nodesCache = docHtml.elementsByTagName('Cache')
+                                if nodesCache.isEmpty():
+                                    nodeGdalWms = docHtml.firstChild()
+                                    nodeCache = docHtml.createElement('Cache')
+                                    nodeGdalWms.appendChild( nodeCache )
+                                else:
+                                    nodeCache = nodesCache.item(0)
+                                    nodesPath = nodeCache.toElement().elementsByTagName('Path')
+                                    if not nodesPath.isEmpty():
+                                        nodePath = nodesPath.item(0)
+                                        nodeCache.removeChild( nodePath )
+                                textNode = docHtml.createTextNode( newPath )
+                                nodePath  = docHtml.createElement('Path')
+                                nodePath.appendChild( textNode )                               
+                                nodeCache.appendChild( nodePath )
+
+                                return docHtml.toString()
+
+                            newPath = "{}.tms".format( localName )
+                            html = setPath( newPath  )
+                            fw = open( localName, 'w' )
+                            fw.write( html)
+                            fw.close()
+
+                        isOk, response = ProcessCatalogOTF.existsUrl( url_xml, True )
+                        if not isOk:
+                            return None
+                        html = response.read()
+                        response.close()
+                        docHtml = QDomDocument()
+                        docHtml.setContent( html.decode('utf-8') )
+                        if not existsServerUrl( docHtml ):
+                            return None
+                        populateLocalFile( docHtml )
+                        return QFileInfo( localName )
+
+                    localName = "{}/{}".format( ProcessCatalogOTF.TEMP_DIR, basename( url_xml ) )
+                    fileInfo = QFileInfo( localName )
+                    if not fileInfo.exists():
+                        fileInfo = createLocalFile() # If error return None
+                    return fileInfo
+
+                source = image['source']
+                if ProcessCatalogOTF.isUrl( source ):
+                    fi = prepareFileTMS( source ) # If error return None
+                else:
+                    fi = QFileInfo( source )
+                    if not fi.isFile():
+                        fi = None
+                vReturn = { 'source': source, 'fileinfo': fi    }
+                if 'date' in image.keys():
+                    vReturn['date'] = image['date']
+
+                return vReturn
+
+            # Sorted images
+            key = 'date' if not self.fieldDate is None else 'source'
+            f_key = lambda item: item[ key ]    
+            l_image_sorted = sorted( images, key=f_key, reverse=True )
+            del images[:]
+            # infoImages = { 'source', 'fileinfo', 'date' } or { 'source', fileinfo' }
+            # - If error when read XML,  'fileinfo'  is None
+            infoImages = []
+            for image in l_image_sorted:
+                if self.isCanceled():
+                    del infoImages[:]
+                    del l_image_sorted[:]
+                    return { 'isOk': False }
+                infoImages.append( getFileInfo( image ) )
+            del l_image_sorted[:]
+            return { 'isOk': True, 'infoImages': infoImages }
+
+        def setNameGroup(layerTreeGroup, isCancel=False):
+            name, total = layerTreeGroup.name(), len( layerTreeGroup.children() )
+            if isCancel:
+                vFormat = QCoreApplication.translate('CatalogOTF', '{} - Cancelled')
+                name = vFormat.format( name )
+            else:
+                vFormat = QCoreApplication.translate('CatalogOTF', '{} ({} Total)')
+                name = vFormat.format( name, total )
+            layerTreeGroup.setName( name )
+
+        def addImages(infoImages, existsDate):
+            def addLayerFunction(infoImages, functionAdd):
+                def setTransparence(layerRaster):
+                    def getListTTVP():
+                        t = QgsRasterTransparency.TransparentThreeValuePixel()
+                        t.red = t.green = t.blue = 0.0
+                        t.percentTransparent = 100.0
+                        return [ t ]
+                    
+                    l_ttvp = getListTTVP()
+                    fileName = layerRaster.source()
+                    if not fileName[-4:] == 'xml':
+                        layerRaster.renderer().rasterTransparency().setTransparentThreeValuePixelList( l_ttvp )
+
+                for info in infoImages:
+                    if self.isCanceled():
+                        return False
+                    if info['fileinfo'] is None:
+                        self.emitError( info['source'] )
+                        continue
+                    self.resultSlot = None
+                    for t in range(10):
+                        self.createRaster.emit( info['fileinfo'].filePath(), info['fileinfo'].baseName() )
+                        self.waitForFinished( self.timeWait['createRaster'] * (1+t) )
+                        if self.resultSlot is None:
+                            continue
+                    layer = self.resultSlot
+                    if layer is None or not layer.isValid():
+                        self.emitError( info['source'] )
+                        continue
+                    setTransparence( layer )
+                    self.resultSlot, self.layerSlot = None, layer
+                    self.addLayerNoLegend.emit()
+                    self.waitForFinished( self.timeWait['addLayerNoLegend'] )
+                    layer = self.resultSlot
+                    functionAdd( layer, info )
+                return True
+
+            def addRastersLegend(infoImages):
+                def add( layer, info):
+                    self.resultSlot, self.ltgSlot, self.layerSlot = None, self.ltgCatalog, layer
+                    self.addRasterTreeGroup.emit()
+                    self.waitForFinished( self.timeWait['addRasterTreeGroup'] )
+                return addLayerFunction( infoImages, add )
+
+            def addRastersLegendDate(infoImages):
+                def getZeroDateLayers():
+                    dates = [ info['date'] for info in infoImages ]
+                    dates = set( dates )
+                    datesLayers = {}
+                    for date in dates:
+                        if self.isCanceled():
+                            return { 'isOk': False }
+                        datesLayers[ date ] = []
+                    return { 'isOk': True, 'datesLayers': datesLayers }
+
+                r = getZeroDateLayers()
+                if not r['isOk']:
+                    return False
+                datesLayers = r['datesLayers']
+                isOk = addLayerFunction( infoImages, lambda layer, info: datesLayers[ info['date'] ].append( layer ) )
+                if not isOk:
+                    return False
+                if self.countError == self.totalFeatures:
+                    return True
+                for date in sorted( datesLayers.keys(), reverse=True ):
+                    if self.isCanceled():
+                        return False
+                    self.resultSlot, self.ltgSlot = None, self.ltgCatalog
+                    self.addTreeGroup.emit( date )
+                    self.waitForFinished( self.timeWait['addTreeGroup'] )
+                    ltgDate = self.resultSlot
+                    for layer in datesLayers[ date ]:
+                        if self.isCanceled():
+                            return False
+                        self.resultSlot, self.ltgSlot, self.layerSlot = None, ltgDate, layer
+                        self.addRasterTreeGroup.emit()
+                        self.waitForFinished( self.timeWait['addRasterTreeGroup'] )
+                    ltgDate.setExpanded( False )
+                    setNameGroup( ltgDate )
+                return True
+
+            addFunc = addRastersLegendDate if existsDate else addRastersLegend
+            isOk = addFunc( infoImages )
+            if not isOk:
+                setNameGroup( self.ltgCatalog, True )
+                return False
+            else:
+                setNameGroup( self.ltgCatalog )
+            return True
+        
+        self.ltgCatalog.setExpanded( False )
+        self.ltgCatalog.setItemVisibilityChecked( False )
+
+        self.countError = 0
+        r = getImagesByCanvas()
+        if not r['isOk']:
+            setNameGroup( self.ltgCatalog, True )
+            return False
+        if len( r['images']) == 0:
+            setNameGroup( self.ltgCatalog )
+            return True
+        r = getInfoImages(r['images'] )
+        if not r['isOk']:
+            setNameGroup( self.ltgCatalog, True )
+            return False
+        infoImages = r['infoImages']
+        self.totalFeatures = len( infoImages )
+        self.foundFeatures.emit( self.totalFeatures )
+        return addImages( infoImages, not self.fieldDate is None )

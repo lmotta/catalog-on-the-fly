@@ -1,50 +1,57 @@
 [general]
-name=Catalog on the fly
-description=Automatically adds images that are in the catalog layer that intersect with the map area.
-about=This plugin work with catalog layer.
-  Catalog layer need be the polygon layer and have two fields, source image(string) and date of image(date).
+name:Catalog on the fly
+description:Automatically adds images that are in the catalog layer that intersect with the map area.
+about:This plugin work with catalog layer.
+  Catalog layer need be have the geometry type of polygon and have a field, the image address(type string),
+  and optionaly can be have a field with the date of image.
   This plugin is developed on the demand of IBAMA(Brazilian Institute of Environment and Renewable Natural Resources)
   http://www.ibama.gov.br
-  See the presentations:
-  - http://pt.slideshare.net/LuizMotta3/presentation-2015-0701ibamaplugins
-  - http://pt.slideshare.net/LuizMotta3/presentation-2015-0715ibamacatalootfinactions
-version=1.5
-qgisMinimumVersion=2.8
-category=Raster
-author=Luiz Motta
-email=motta.luiz@gmail.com
-changelog=1.5 (2016-03-30)
-  - Check if has valid link for XML and add message when not valid. Fixed bug when link is broken
-  1.4
-  - Identifies date field, where, type is Text, the format of values are yyyy-MM-dd
-  1.3
-  - Updated the procedure cancel huge data
-  1.2
-  - Decrease number of catalog layer when remove one these
-  1.1
-  - Refactoring of cancel process when remove catalog layer
-  1.0
-  - Added context menu for local image, refactoring the table, change for button for search images
-  0.9
-  - Added context menu for TMS image
-  0.8
-  - Use project file for save GDAL_WMS raster inside.
-  - Update selected check behavior 
-  0.7
-  - Correction for identify catalog from Postgres.
-  - Removed FID = 0 in getNameFieldsCatalog().getFirstFeature(), first FID for Postfgres is 1 and not 0
-  0.6
-  - Create 'tmp' directory (case for Windows user)
-    Refactoring the multiprocess (use of QThread) 
-  0.5
-  - Add thread for calculate images in group of catalog
-  0.1
-  - Start of plugin
 
-tags=catalog,raster, satellite, IBAMA
-homepage=https://github.com/lmotta/catalog-on-the-fly
-tracker=http://hub.qgis.org/projects/catalogotf
-repository=https://github.com/lmotta/catalog-on-the-fly
-icon=catalogotf.svg
-experimental=True
-deprecated=False
+version:2.0
+qgisMinimumVersion:3.2
+
+author:Luiz Motta
+email:motta.luiz@gmail.com
+
+category:Raster
+
+tags:catalog,raster,satellite,IBAMA
+
+homepage:https://github.com/lmotta/catalog-on-the-fly/wiki
+tracker:https://github.com/lmotta/catalog-on-the-fly/issues
+repository:https://github.com/lmotta/catalog-on-the-fly
+
+icon:catalogotf.svg
+
+experimental:True
+deprecated:False
+
+changelog: 2.0(2019-01-18)
+  Migrated to QGIS 3.2
+  - 1.5 (2016-03-30)
+  Check if has valid link for XML and add message when not valid. Fixed bug when link is broken
+  - 1.4
+  Identifies date field, where, type is Text, the format of values are yyyy-MM-dd
+  - 1.3
+  Updated the procedure cancel huge data
+  - 1.2
+  Decrease number of catalog layer when remove one these
+  - 1.1
+  Refactoring of cancel process when remove catalog layer
+  - 1.0
+  Added context menu for local image, refactoring the table, change for button for search images
+  - 0.9
+  Added context menu for TMS image
+  - 0.8
+  Use project file for save GDAL_WMS raster inside.
+  Update selected check behavior 
+  - 0.7
+  Correction for identify catalog from Postgres.
+  Removed FID = 0 in getNameFieldsCatalog().getFirstFeature(), first FID for Postfgres is 1 and not 0
+  - 0.6
+  Create 'tmp' directory (case for Windows user)
+  Refactoring the multiprocess (use of QThread) 
+  - 0.5
+  Add thread for calculate images in group of catalog
+  - 0.1
+  Start of plugin
