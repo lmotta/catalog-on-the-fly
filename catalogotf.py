@@ -18,6 +18,13 @@ email                : motta.luiz@gmail.com
  *                                                                         *
  ***************************************************************************/
 """
+
+__author__ = 'Luiz Motta'
+__date__ = '2015-04-01'
+__copyright__ = '(C) 2015, Luiz Motta'
+__revision__ = '$Format:%H$'
+
+
 import urllib.request
 import urllib.error
 
@@ -46,7 +53,8 @@ from qgis.core import (
     Qgis, QgsWkbTypes,
     QgsMessageLog,
     QgsApplication, QgsTask, QgsProject,
-    QgsMapLayer, QgsRasterLayer, QgsLayerTreeNode, QgsRasterTransparency, QgsFeature,
+    QgsLayerTreeGroup, QgsLayerTreeNode,
+    QgsMapLayer, QgsRasterLayer, QgsRasterTransparency, QgsFeature,
     QgsFeatureRequest, QgsSpatialIndex,
     QgsCoordinateTransform,
 )
@@ -275,23 +283,34 @@ class ProcessCatalogOTF(QObject):
     @pyqtSlot(str)
     def addTreeGroupTask(self, name ):
         task = self.sender()
+        if not isinstance( task.ltgSlot, QgsLayerTreeGroup ):
+            task.checkInput = False
+            return
+        task.checkInput = True
         task.resultSlot = task.ltgSlot.addGroup( name )
 
     @pyqtSlot()
     def addLayerNoLegendTask(self):
         task = self.sender()
+        if not isinstance( task.layerSlot, QgsRasterLayer ):
+            task.checkInput = False
+            return True
+        task.checkInput = True
         task.resultSlot = self.project.addMapLayer( task.layerSlot, addToLegend=False )
-
-    @pyqtSlot(str, str)
-    def createRasterTask(self, source, name):
-        task = self.sender()
-        task.resultSlot = QgsRasterLayer( source, name )
 
     @pyqtSlot()
     def addRasterTreeGroupTask(self):
         task = self.sender()
-        task.ltgSlot.addLayer( task.layerSlot )
-        task.resultSlot = True
+        if not isinstance( task.ltgSlot, QgsLayerTreeGroup ) or not isinstance( task.layerSlot, QgsRasterLayer ):
+            task.checkInput = False
+            return
+        task.checkInput = True
+        ltl = task.ltgSlot.addLayer( task.layerSlot )
+        if ltl is None:
+            task.resultSlot = False
+        else:
+            ltl.setExpanded( False )
+            task.resultSlot = True
 
     @pyqtSlot('long', int)
     def statusProcessing(self, taskid, status):
@@ -335,7 +354,6 @@ class ProcessCatalogOTF(QObject):
         else:
             setLabelProcessing( label )
 
-
     @pyqtSlot(int)
     def statusFoundFeatures(self, totalInView):
         task = self.sender()
@@ -377,7 +395,6 @@ class ProcessCatalogOTF(QObject):
                     'fieldDate':          nameFields['fieldDate'],
                     'addTreeGroup':       self.addTreeGroupTask,
                     'addLayerNoLegend':  self.addLayerNoLegendTask,
-                    'createRaster':       self.createRasterTask,
                     'addRasterTreeGroup': self.addRasterTreeGroupTask,
                 }
                 task = TaskCatalogOTF( data )
@@ -530,7 +547,6 @@ class TaskCatalogOTF(QgsTask):
     foundFeatures      = pyqtSignal(int)
     addTreeGroup       = pyqtSignal(str)
     addLayerNoLegend   = pyqtSignal()
-    createRaster       = pyqtSignal(str, str)
     addRasterTreeGroup = pyqtSignal()
 
     def __init__(self, data ):
@@ -549,13 +565,12 @@ class TaskCatalogOTF(QgsTask):
          self.timeWait = {
              'addTreeGroup': 2,
              'addLayerNoLegend': 2,
-             'createRaster': 10,
              'addRasterTreeGroup': 2
          }
-         self.resultSlot, self.layerSlot, self.ltgSlot = None, None, None
+         self.layerSlot, self.ltgSlot = None, None
+         self.resultSlot, self.checkInput = None, None
          self.addTreeGroup.connect( data['addTreeGroup'] )
          self.addLayerNoLegend.connect( data['addLayerNoLegend'] )
-         self.createRaster.connect( data['createRaster'] )
          self.addRasterTreeGroup.connect( data['addRasterTreeGroup'] )
 
     def emitStatus(self, value, level):
@@ -759,29 +774,38 @@ class TaskCatalogOTF(QgsTask):
                     if info['fileinfo'] is None:
                         self.emitError( info['source'] )
                         continue
-                    self.resultSlot = None
-                    for t in range(10):
-                        self.createRaster.emit( info['fileinfo'].filePath(), info['fileinfo'].baseName() )
-                        self.waitForFinished( self.timeWait['createRaster'] * (1+t) )
-                        if self.resultSlot is None:
-                            continue
-                    layer = self.resultSlot
+                    layer = QgsRasterLayer( info['fileinfo'].filePath(), info['fileinfo'].baseName() )
                     if layer is None or not layer.isValid():
                         self.emitError( info['source'] )
+                        layer = None
                         continue
                     setTransparence( layer )
-                    self.resultSlot, self.layerSlot = None, layer
+                    layer.moveToThread( self.project.thread() )
+                    self.checkInput, self.resultSlot = False, None
+                    self.layerSlot = layer
                     self.addLayerNoLegend.emit()
                     self.waitForFinished( self.timeWait['addLayerNoLegend'] )
+                    if not self.checkInput:
+                        self.emitError("addLayerNoLegend (Input) - {}".format( info['source'] ) )
+                        continue
+                    if not isinstance( self.resultSlot, QgsRasterLayer ):
+                        self.emitError("addLayerNoLegend (Output) - {}".format( info['source'] ) )
+                        continue
                     layer = self.resultSlot
                     functionAdd( layer, info )
                 return True
 
             def addRastersLegend(infoImages):
                 def add( layer, info):
-                    self.resultSlot, self.ltgSlot, self.layerSlot = None, self.ltgCatalog, layer
+                    self.checkInput, self.resultSlot = False, False
+                    self.ltgSlot, self.layerSlot = self.ltgCatalog, layer
                     self.addRasterTreeGroup.emit()
                     self.waitForFinished( self.timeWait['addRasterTreeGroup'] )
+                    if not self.checkInput:
+                        self.emitError("addRasterTreeGroup (Input) - {}".format( info['source'] ) )
+                        return
+                    if not self.resultSlot:
+                        self.emitError("addRasterTreeGroup (Output) - {}".format( info['source'] ) )
                 return addLayerFunction( infoImages, add )
 
             def addRastersLegendDate(infoImages):
@@ -807,16 +831,34 @@ class TaskCatalogOTF(QgsTask):
                 for date in sorted( datesLayers.keys(), reverse=True ):
                     if self.isCanceled():
                         return False
-                    self.resultSlot, self.ltgSlot = None, self.ltgCatalog
+                    self.checkInput, self.resultSlot = False, None
+                    self.ltgSlot = self.ltgCatalog
                     self.addTreeGroup.emit( date )
                     self.waitForFinished( self.timeWait['addTreeGroup'] )
+                    if not self.checkInput:
+                        msg = QCoreApplication.translate('CatalogOTF', 'addTreeGroup (Input) - Creating {} group')
+                        self.emitError( msg.format( date ) )
+                        continue
+                    if not isinstance( self.resultSlot, QgsLayerTreeGroup ):
+                        msg = QCoreApplication.translate('CatalogOTF', 'addTreeGroup (Output) - Creating {} group')
+                        self.emitError( msg.format( date ) )
+                        continue
                     ltgDate = self.resultSlot
                     for layer in datesLayers[ date ]:
                         if self.isCanceled():
                             return False
-                        self.resultSlot, self.ltgSlot, self.layerSlot = None, ltgDate, layer
+                        self.checkInput, self.resultSlot = False, None
+                        self.ltgSlot, self.layerSlot = ltgDate, layer
                         self.addRasterTreeGroup.emit()
                         self.waitForFinished( self.timeWait['addRasterTreeGroup'] )
+                        if not self.checkInput:
+                            msg = QCoreApplication.translate('CatalogOTF', 'addRasterTreeGroup (Input) - Add {} layer')
+                            self.emitError( msg.format( date ) )
+                            continue
+                        if not self.resultSlot:
+                            msg = QCoreApplication.translate('CatalogOTF', 'addRasterTreeGroup (Output) - Add {} layer')
+                            self.emitError( msg.format( layer.name() ) )
+                            continue
                     ltgDate.setExpanded( False )
                     setNameGroup( ltgDate )
                 return True
