@@ -1,4 +1,4 @@
-# -*- coding: utf-8 -*-
+''# -*- coding: utf-8 -*-
 """
 /***************************************************************************
 Name                 : Catalog on the fly
@@ -29,6 +29,7 @@ import urllib.request
 import urllib.error
 
 from os.path import basename, dirname, join as joinPath
+from enum import Enum
 
 from qgis.PyQt.QtCore import (
     QObject, Qt, QCoreApplication,
@@ -59,7 +60,25 @@ from qgis.core import (
     QgsCoordinateTransform,
 )
 
+from qgis import utils as QgsUtils
+
 from qgis.gui import QgsMessageBar
+
+
+import datetime
+from qgis.core import QgsLayerTreeLayer
+
+class TypeLayerTreeGroup(Enum):
+    CATALOG = 1
+    DATE = 2
+
+class TypeSufixLayerTreeGroup(Enum):
+    CANCELLED = 1
+    TOTAL = 2
+
+class TypeStatusProcessing(Enum):
+    COMPLETE = 1
+    CANCELLED = 2
 
 class DockWidgetCatalogOTF(QDockWidget):
     runCatalog  = pyqtSignal(bool, list)
@@ -267,10 +286,10 @@ class ProcessCatalogOTF(QObject):
         self.namePlugin = 'Catalog OTF'
         self.project = QgsProject.instance()
         self.taskManager = QgsApplication.taskManager()
+        self.taskLayerTreeGroup = {} # Set in 'run()' layer_catalog_id' : { TypeLayerTreeGroup.CATALOG: , TypeLayerTreeGroup.DATE: }
         self.ltgRoot = self.project.layerTreeRoot()
         #
         self.nameCatalog = 'Catalogs OTF'
-        TaskCatalogOTF.iface = iface
         self.totalRunning = 0
         self.totalFinish = 0
         self.msgUseDir_gdal_wms = None
@@ -280,37 +299,44 @@ class ProcessCatalogOTF(QObject):
         self.project.layerWillBeRemoved.connect( self.removeLayer )
         self.taskManager.statusChanged.connect( self.statusProcessing )
 
-    @pyqtSlot(str)
-    def addTreeGroupTask(self, name ):
-        task = self.sender()
-        if not isinstance( task.ltgSlot, QgsLayerTreeGroup ):
-            task.checkInput = False
-            return
-        task.checkInput = True
-        task.resultSlot = task.ltgSlot.addGroup( name )
+    @pyqtSlot(str, str)
+    def addDateTreeGroupTask(self, layerId, nameDate ):
+        ltg = self.taskLayerTreeGroup[ layerId ][ TypeLayerTreeGroup.CATALOG ]
+        self.taskLayerTreeGroup[ layerId ][ TypeLayerTreeGroup.DATE ] = ltg.addGroup( nameDate )
 
-    @pyqtSlot()
-    def addLayerNoLegendTask(self):
-        task = self.sender()
-        if not isinstance( task.layerSlot, QgsRasterLayer ):
-            task.checkInput = False
-            return True
-        task.checkInput = True
-        task.resultSlot = self.project.addMapLayer( task.layerSlot, addToLegend=False )
+    @pyqtSlot(str, TypeLayerTreeGroup, dict)
+    def addRasterTreeGroupTask(self, layerId, typeGroup, info):
+        def setTransparence(layerRaster):
+            def getListTTVP():
+                t = QgsRasterTransparency.TransparentThreeValuePixel()
+                t.red = t.green = t.blue = 0.0
+                t.percentTransparent = 100.0
+                return [ t ]
+            
+            l_ttvp = getListTTVP()
+            fileName = layerRaster.source()
+            if not fileName[-4:] == 'xml':
+                layerRaster.renderer().rasterTransparency().setTransparentThreeValuePixelList( l_ttvp )
 
-    @pyqtSlot()
-    def addRasterTreeGroupTask(self):
-        task = self.sender()
-        if not isinstance( task.ltgSlot, QgsLayerTreeGroup ) or not isinstance( task.layerSlot, QgsRasterLayer ):
-            task.checkInput = False
-            return
-        task.checkInput = True
-        ltl = task.ltgSlot.addLayer( task.layerSlot )
-        if ltl is None:
-            task.resultSlot = False
+        layer = QgsRasterLayer( info['filePath'], info['baseName'] )
+        setTransparence( layer )
+        self.project.addMapLayer( layer, addToLegend=False )
+        ltg = self.taskLayerTreeGroup[ layerId ][ typeGroup ]
+        ltl = ltg.addLayer( layer )
+        ltl.setExpanded( False )
+
+    @pyqtSlot(str, TypeLayerTreeGroup, TypeSufixLayerTreeGroup)
+    def setNameGroupTask(self, layerId, typeGroup, typeSufix):
+        ltg = self.taskLayerTreeGroup[ layerId ][ typeGroup ]
+        name, total = ltg.name(), len( ltg.children() )
+        if typeSufix == TypeSufixLayerTreeGroup.CANCELLED:
+            msg = QCoreApplication.translate('CatalogOTF', '{} - Cancelled')
+            name = msg.format( name )
         else:
-            ltl.setExpanded( False )
-            task.resultSlot = True
+            msg = QCoreApplication.translate('CatalogOTF', '{} ({} Total)')
+            name = msg.format( name, total )
+        ltg.setName( name )
+        ltg.setExpanded( False )
 
     @pyqtSlot('long', int)
     def statusProcessing(self, taskid, status):
@@ -330,7 +356,7 @@ class ProcessCatalogOTF(QObject):
             return label
 
         def setLabelProcessing(label):
-            rowTable = layerIdsTable[ task.layer.id() ]
+            rowTable = layerIdsTable[ task.layerId ]
             self.widget.setLayerItemProcessing( task.layer, rowTable, label)
 
         def setLabelFinishAll():
@@ -358,7 +384,7 @@ class ProcessCatalogOTF(QObject):
     def statusFoundFeatures(self, totalInView):
         task = self.sender()
         layerIdsTable = self.widget.getLayerIds(True)
-        rowTable = layerIdsTable[ task.layer.id() ]
+        rowTable = layerIdsTable[ task.layerId ]
         label = QCoreApplication.translate('CatalogOTF', 'Running...')
         self.widget.setLayerItemProcessing( task.layer, rowTable, label, totalInView )
 
@@ -381,21 +407,28 @@ class ProcessCatalogOTF(QObject):
                     ltgRootCatalog.removeAllChildren()
                 return ltgRootCatalog
 
+            def setLayerTreeGroupCatalog(layerId, rowTable):
+                ltgCatalog = ltgRootCatalog.addGroup( self.widget.getNameLayer( rowTable) )
+                ltgCatalog.setExpanded( False )
+                ltgCatalog.setItemVisibilityChecked( False )
+                self.taskLayerTreeGroup[ layerId ] = { TypeLayerTreeGroup.CATALOG: ltgCatalog, TypeLayerTreeGroup.DATE: None }
+
+            self.taskLayerTreeGroup.clear()
             self.widget.enableProcessing( True ) # Set value isProcessing in self.widget
             ltgRootCatalog = getRootCatalog()
             layerIdsTable = self.widget.getLayerIds(True)
             self.totalFinish, self.totalRunning = 0, len( layerIds )
             for layerId in layerIds:
                 rowTable = layerIdsTable[ layerId ]
+                setLayerTreeGroupCatalog( layerId, rowTable )
                 nameFields = self.widget.getNameFields( rowTable )
                 data = {
-                    'layer':              self.ltgRoot.findLayer( layerId ).layer(),
-                    'ltgCatalog':         ltgRootCatalog.addGroup( self.widget.getNameLayer( rowTable) ),
-                    'fieldSource':        nameFields['fieldSource'],
-                    'fieldDate':          nameFields['fieldDate'],
-                    'addTreeGroup':       self.addTreeGroupTask,
-                    'addLayerNoLegend':  self.addLayerNoLegendTask,
-                    'addRasterTreeGroup': self.addRasterTreeGroupTask,
+                    'layer':       self.ltgRoot.findLayer( layerId ).layer(),
+                    'fieldSource': nameFields['fieldSource'],
+                    'fieldDate':   nameFields['fieldDate'],
+                    'addDateTreeGroupTask':   self.addDateTreeGroupTask,
+                    'addRasterTreeGroupTask': self.addRasterTreeGroupTask,
+                    'setNameGroupTask':       self.setNameGroupTask,
                 }
                 task = TaskCatalogOTF( data )
                 task.messageLog.connect( self.messageLog )
@@ -407,7 +440,7 @@ class ProcessCatalogOTF(QObject):
             msg = QCoreApplication.translate('CatalogOTF', 'Cancelled by user')
             self.msgBar.clearWidgets()
             self.msgBar.pushMessage( self.namePlugin , msg, Qgis.Warning, 4 )
-            self.taskManager.cancelAll() # # Set value isProcessing in 'statusProcessing'(all finished)
+            self.taskManager.cancelAll() # Set value isProcessing in 'statusProcessing'(all finished)
 
         _stop() if isProcessing else _run()
 
@@ -541,37 +574,30 @@ class ProcessCatalogOTF(QObject):
                 self.widget.setNameLayer( layerIdsTable[ layerId ], name )
 
 class TaskCatalogOTF(QgsTask):
-    iface = None
     messageLog         = pyqtSignal(str, str)
     messageStatus      = pyqtSignal(str, int)
     foundFeatures      = pyqtSignal(int)
-    addTreeGroup       = pyqtSignal(str)
-    addLayerNoLegend   = pyqtSignal()
-    addRasterTreeGroup = pyqtSignal()
+    addDateTreeGroup   = pyqtSignal(str, str)
+    addRasterTreeGroup = pyqtSignal(str, TypeLayerTreeGroup, dict)
+    setNameGroup       = pyqtSignal(str, TypeLayerTreeGroup, TypeSufixLayerTreeGroup)
 
     def __init__(self, data ):
          super().__init__('CatalogOTF', QgsTask.CanCancel )
          self.project = QgsProject.instance()
          self.layer = data['layer']
-         self.ltgCatalog = data['ltgCatalog']
+         self.layerId = self.layer.id()
          self.fieldSource = data['fieldSource']
          self.fieldDate = data['fieldDate']
-         self.canvas = self.iface.mapCanvas()
+         self.canvas = QgsUtils.iface.mapCanvas()
          self.formatError = QCoreApplication.translate('CatalogOTF', "Error '{}'" )
          self.countError = 0
          self.totalFeatures = 0
          self.setDependentLayers( [ self.layer] )
 
-         self.timeWait = {
-             'addTreeGroup': 2,
-             'addLayerNoLegend': 2,
-             'addRasterTreeGroup': 2
-         }
-         self.layerSlot, self.ltgSlot = None, None
-         self.resultSlot, self.checkInput = None, None
-         self.addTreeGroup.connect( data['addTreeGroup'] )
-         self.addLayerNoLegend.connect( data['addLayerNoLegend'] )
-         self.addRasterTreeGroup.connect( data['addRasterTreeGroup'] )
+         self.timeWait = 2
+         self.addDateTreeGroup.connect( data['addDateTreeGroupTask'] )
+         self.addRasterTreeGroup.connect( data['addRasterTreeGroupTask'] )
+         self.setNameGroup.connect( data['setNameGroupTask'] )
 
     def emitStatus(self, value, level):
         msg = "{}: {}".format( self.layer.name(), value )
@@ -606,7 +632,7 @@ class TaskCatalogOTF(QgsTask):
                 del index
                 return { 'fids': fids, 'rectCanvas': rectCanvas }
 
-            def getImagesIntersect(fids, rectCarootnvas):
+            def getImagesIntersect(fids, rectCanvas):
                 nfS, nfD = self.fieldSource, self.fieldDate
                 
                 if not self.fieldDate is None:
@@ -623,24 +649,20 @@ class TaskCatalogOTF(QgsTask):
                 images = []
                 while it.nextFeature( feat ):
                     if self.isCanceled():
-                        return { 'isOk': False }
+                        return { 'status': TypeStatusProcessing.CANCELLED }
                     if feat.geometry().intersects( rectCanvas ):
                         images.append( getAttributes( feat ) )
 
-                return { 'isOk': True, 'images': images }
+                return { 'status': TypeStatusProcessing.COMPLETE, 'images': images }
 
             r = getFidsSpatialIndexIntersect()
             fids = r['fids']
             if fids is None:
-                return { 'isOk': True, 'images': [] }
+                return { 'status': TypeStatusProcessing.COMPLETE, 'images': [] }
             rectCanvas = r['rectCanvas']
             r = getImagesIntersect( fids, rectCanvas )
-            if not r['isOk']:
-                return { 'isOk': False }
-            images = r['images']
             del fids[:]
-
-            return { 'isOk': True, 'images': images }
+            return r
 
         def getInfoImages(images):
             def getFileInfo( image ):
@@ -739,73 +761,38 @@ class TaskCatalogOTF(QgsTask):
                 if self.isCanceled():
                     del infoImages[:]
                     del l_image_sorted[:]
-                    return { 'isOk': False }
+                    return { 'status': TypeStatusProcessing.CANCELLED }
                 infoImages.append( getFileInfo( image ) )
             del l_image_sorted[:]
-            return { 'isOk': True, 'infoImages': infoImages }
-
-        def setNameGroup(layerTreeGroup, isCancel=False):
-            name, total = layerTreeGroup.name(), len( layerTreeGroup.children() )
-            if isCancel:
-                vFormat = QCoreApplication.translate('CatalogOTF', '{} - Cancelled')
-                name = vFormat.format( name )
-            else:
-                vFormat = QCoreApplication.translate('CatalogOTF', '{} ({} Total)')
-                name = vFormat.format( name, total )
-            layerTreeGroup.setName( name )
+            return { 'status': TypeStatusProcessing.COMPLETE, 'infoImages': infoImages }
 
         def addImages(infoImages, existsDate):
             def addLayerFunction(infoImages, functionAdd):
-                def setTransparence(layerRaster):
-                    def getListTTVP():
-                        t = QgsRasterTransparency.TransparentThreeValuePixel()
-                        t.red = t.green = t.blue = 0.0
-                        t.percentTransparent = 100.0
-                        return [ t ]
-                    
-                    l_ttvp = getListTTVP()
-                    fileName = layerRaster.source()
-                    if not fileName[-4:] == 'xml':
-                        layerRaster.renderer().rasterTransparency().setTransparentThreeValuePixelList( l_ttvp )
-
                 for info in infoImages:
                     if self.isCanceled():
-                        return False
+                        return { 'status': TypeStatusProcessing.CANCELLED }
                     if info['fileinfo'] is None:
                         self.emitError( info['source'] )
                         continue
-                    layer = QgsRasterLayer( info['fileinfo'].filePath(), info['fileinfo'].baseName() )
+                    filePath = info['fileinfo'].filePath()
+                    baseName = info['fileinfo'].baseName()
+                    layer = QgsRasterLayer( filePath, baseName )
                     if layer is None or not layer.isValid():
                         self.emitError( info['source'] )
                         layer = None
                         continue
-                    setTransparence( layer )
-                    layer.moveToThread( self.project.thread() )
-                    self.checkInput, self.resultSlot = False, None
-                    self.layerSlot = layer
-                    self.addLayerNoLegend.emit()
-                    self.waitForFinished( self.timeWait['addLayerNoLegend'] )
-                    if not self.checkInput:
-                        self.emitError("addLayerNoLegend (Input) - {}".format( info['source'] ) )
-                        continue
-                    if not isinstance( self.resultSlot, QgsRasterLayer ):
-                        self.emitError("addLayerNoLegend (Output) - {}".format( info['source'] ) )
-                        continue
-                    layer = self.resultSlot
-                    functionAdd( layer, info )
-                return True
+                    layer = None
+                    del info['fileinfo']
+                    info['filePath'] = filePath
+                    info['baseName'] = baseName
+                    functionAdd( info )
+                return { 'status': TypeStatusProcessing.COMPLETE }
 
             def addRastersLegend(infoImages):
-                def add( layer, info):
-                    self.checkInput, self.resultSlot = False, False
-                    self.ltgSlot, self.layerSlot = self.ltgCatalog, layer
-                    self.addRasterTreeGroup.emit()
-                    self.waitForFinished( self.timeWait['addRasterTreeGroup'] )
-                    if not self.checkInput:
-                        self.emitError("addRasterTreeGroup (Input) - {}".format( info['source'] ) )
-                        return
-                    if not self.resultSlot:
-                        self.emitError("addRasterTreeGroup (Output) - {}".format( info['source'] ) )
+                def add( info):
+                    self.addRasterTreeGroup.emit( self.layerId, TypeLayerTreeGroup.CATALOG, info )
+                    #self.waitForFinished( self.timeWait )
+
                 return addLayerFunction( infoImages, add )
 
             def addRastersLegendDate(infoImages):
@@ -815,79 +802,56 @@ class TaskCatalogOTF(QgsTask):
                     datesLayers = {}
                     for date in dates:
                         if self.isCanceled():
-                            return { 'isOk': False }
+                            return { 'status': TypeStatusProcessing.CANCELLED }
                         datesLayers[ date ] = []
-                    return { 'isOk': True, 'datesLayers': datesLayers }
+                    return { 'status': TypeStatusProcessing.COMPLETE, 'datesLayers': datesLayers }
 
                 r = getZeroDateLayers()
-                if not r['isOk']:
-                    return False
+                if r['status'] == TypeStatusProcessing.CANCELLED:
+                    return r
                 datesLayers = r['datesLayers']
-                isOk = addLayerFunction( infoImages, lambda layer, info: datesLayers[ info['date'] ].append( layer ) )
-                if not isOk:
-                    return False
+                r = addLayerFunction( infoImages, lambda info: datesLayers[ info['date'] ].append( info ) )
+                if r['status'] == TypeStatusProcessing.CANCELLED:
+                    del datesLayers[:]
+                    return r
                 if self.countError == self.totalFeatures:
-                    return True
+                    return { 'status': TypeStatusProcessing.COMPLETE }
                 for date in sorted( datesLayers.keys(), reverse=True ):
                     if self.isCanceled():
-                        return False
-                    self.checkInput, self.resultSlot = False, None
-                    self.ltgSlot = self.ltgCatalog
-                    self.addTreeGroup.emit( date )
-                    self.waitForFinished( self.timeWait['addTreeGroup'] )
-                    if not self.checkInput:
-                        msg = QCoreApplication.translate('CatalogOTF', 'addTreeGroup (Input) - Creating {} group')
-                        self.emitError( msg.format( date ) )
-                        continue
-                    if not isinstance( self.resultSlot, QgsLayerTreeGroup ):
-                        msg = QCoreApplication.translate('CatalogOTF', 'addTreeGroup (Output) - Creating {} group')
-                        self.emitError( msg.format( date ) )
-                        continue
-                    ltgDate = self.resultSlot
-                    for layer in datesLayers[ date ]:
-                        if self.isCanceled():
-                            return False
-                        self.checkInput, self.resultSlot = False, None
-                        self.ltgSlot, self.layerSlot = ltgDate, layer
-                        self.addRasterTreeGroup.emit()
-                        self.waitForFinished( self.timeWait['addRasterTreeGroup'] )
-                        if not self.checkInput:
-                            msg = QCoreApplication.translate('CatalogOTF', 'addRasterTreeGroup (Input) - Add {} layer')
-                            self.emitError( msg.format( date ) )
-                            continue
-                        if not self.resultSlot:
-                            msg = QCoreApplication.translate('CatalogOTF', 'addRasterTreeGroup (Output) - Add {} layer')
-                            self.emitError( msg.format( layer.name() ) )
-                            continue
-                    ltgDate.setExpanded( False )
-                    setNameGroup( ltgDate )
-                return True
+                        return { 'status': TypeStatusProcessing.CANCELLED }
+                    self.addDateTreeGroup.emit( self.layerId, date )
+                    self.waitForFinished( self.timeWait )
+                    for info in datesLayers[ date ]:
+                        if r['status'] == TypeStatusProcessing.CANCELLED:
+                            return { 'status': TypeStatusProcessing.CANCELLED }
+                        self.addRasterTreeGroup.emit( self.layerId, TypeLayerTreeGroup.DATE, info )
+                        #self.waitForFinished( self.timeWait )
+                    self.setNameGroup.emit(  self.layerId, TypeLayerTreeGroup.DATE, TypeSufixLayerTreeGroup.TOTAL )
+                    self.waitForFinished( self.timeWait )
+                return { 'status': TypeStatusProcessing.COMPLETE }
 
             addFunc = addRastersLegendDate if existsDate else addRastersLegend
-            isOk = addFunc( infoImages )
-            if not isOk:
-                setNameGroup( self.ltgCatalog, True )
-                return False
+            r = addFunc( infoImages )
+            if r['status'] == TypeStatusProcessing.CANCELLED:
+                self.setNameGroup.emit( self.layerId, TypeLayerTreeGroup.CATALOG, TypeSufixLayerTreeGroup.CANCELLED )
             else:
-                setNameGroup( self.ltgCatalog )
-            return True
+                self.setNameGroup.emit( self.layerId, TypeLayerTreeGroup.CATALOG, TypeSufixLayerTreeGroup.TOTAL )
+            return r
         
-        self.ltgCatalog.setExpanded( False )
-        self.ltgCatalog.setItemVisibilityChecked( False )
-
         self.countError = 0
         r = getImagesByCanvas()
-        if not r['isOk']:
-            setNameGroup( self.ltgCatalog, True )
+        if r['status'] == TypeStatusProcessing.CANCELLED:
+            self.setNameGroup.emit( self.layerId, TypeLayerTreeGroup.CATALOG, TypeSufixLayerTreeGroup.CANCELLED )
             return False
         if len( r['images']) == 0:
-            setNameGroup( self.ltgCatalog )
+            self.setNameGroup.emit( self.layerId, TypeLayerTreeGroup.CATALOG, TypeSufixLayerTreeGroup.TOTAL )
             return True
         r = getInfoImages(r['images'] )
-        if not r['isOk']:
-            setNameGroup( self.ltgCatalog, True )
+        if r['status'] == TypeStatusProcessing.CANCELLED:
+            self.setNameGroup.emit( self.layerId, TypeLayerTreeGroup.CATALOG, TypeSufixLayerTreeGroup.CANCELLED )
             return False
         infoImages = r['infoImages']
         self.totalFeatures = len( infoImages )
         self.foundFeatures.emit( self.totalFeatures )
-        return addImages( infoImages, not self.fieldDate is None )
+        r = addImages( infoImages, not self.fieldDate is None )
+        return True if r['status'] == TypeStatusProcessing.COMPLETE else False
