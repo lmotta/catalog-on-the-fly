@@ -7,7 +7,7 @@ about:This plugin work with catalog layer.
   This plugin is developed on the demand of IBAMA(Brazilian Institute of Environment and Renewable Natural Resources)
   http://www.ibama.gov.br
 
-version:2.0
+version:2.1
 qgisMinimumVersion:3.2
 
 author:Luiz Motta
@@ -26,7 +26,9 @@ icon:catalogotf.svg
 experimental:True
 deprecated:False
 
-changelog: 2.0(2019-01-18)
+changelog: 2.1(2019-02-06)
+  Change using Layer created by QTask in main thread
+  - 2.0(2019-01-18)
   Migrated to QGIS 3.2
   - 1.5 (2016-03-30)
   Check if has valid link for XML and add message when not valid. Fixed bug when link is broken
