@@ -34,7 +34,7 @@ from enum import Enum
 from qgis.PyQt.QtCore import (
     QObject, Qt, QCoreApplication,
     QVariant, QDate,
-    QFileInfo, QDir,
+    QFileInfo, QDir, QStandardPaths,
     pyqtSlot, pyqtSignal,
 )
 
@@ -259,7 +259,7 @@ class DockWidgetCatalogOTF(QDockWidget):
         self.findCatalog.emit()
 
 class ProcessCatalogOTF(QObject):
-    TEMP_DIR = '/tmp/catalogotf_gdal_wms'
+    TEMP_DIR = joinPath( QStandardPaths.writableLocation(QStandardPaths.TempLocation), 'catalogotf_gdal_wms' )
     formatQDate = 'yyyy-MM-dd'
 
     @staticmethod
