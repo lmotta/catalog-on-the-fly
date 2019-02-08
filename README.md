@@ -12,6 +12,8 @@ Automatically adds  images that are in the catalog layer that intersect with the
 Luiz Motta
 
 ## Changelog
+- 2019-02-08
+Add QStandardPaths for TEMP_DIR
 - 2019-02-06
 Change using Layer created by QTask in main thread
 - 2019-01-18
