@@ -12,6 +12,8 @@ Automatically adds  images that are in the catalog layer that intersect with the
 Luiz Motta
 
 ## Changelog
+- 2019-02-11
+Add transparecy for raster(Single or RGB bands)
 - 2019-02-08
 Add QStandardPaths for TEMP_DIR
 - 2019-02-06
