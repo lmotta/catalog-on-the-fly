@@ -1,4 +1,4 @@
-''# -*- coding: utf-8 -*-
+# -*- coding: utf-8 -*-
 """
 /***************************************************************************
 Name                 : Catalog on the fly
@@ -55,7 +55,7 @@ from qgis.core import (
     QgsMessageLog,
     QgsApplication, QgsTask, QgsProject,
     QgsLayerTreeGroup, QgsLayerTreeNode,
-    QgsMapLayer, QgsRasterLayer, QgsRasterTransparency, QgsFeature,
+    QgsMapLayer, QgsRasterLayer, QgsFeature,
     QgsFeatureRequest, QgsSpatialIndex,
     QgsCoordinateTransform,
 )
@@ -64,9 +64,7 @@ from qgis import utils as QgsUtils
 
 from qgis.gui import QgsMessageBar
 
-
-import datetime
-from qgis.core import QgsLayerTreeLayer
+from .transparencylayer import RasterTransparency
 
 class TypeLayerTreeGroup(Enum):
     CATALOG = 1
@@ -306,20 +304,9 @@ class ProcessCatalogOTF(QObject):
 
     @pyqtSlot(str, TypeLayerTreeGroup, dict)
     def addRasterTreeGroupTask(self, layerId, typeGroup, info):
-        def setTransparence(layerRaster):
-            def getListTTVP():
-                t = QgsRasterTransparency.TransparentThreeValuePixel()
-                t.red = t.green = t.blue = 0.0
-                t.percentTransparent = 100.0
-                return [ t ]
-            
-            l_ttvp = getListTTVP()
-            fileName = layerRaster.source()
-            if not fileName[-4:] == 'xml':
-                layerRaster.renderer().rasterTransparency().setTransparentThreeValuePixelList( l_ttvp )
-
         layer = QgsRasterLayer( info['filePath'], info['baseName'] )
-        setTransparence( layer )
+        if not info['filePath'][-4:] == 'xml':
+            RasterTransparency.setTransparency( layer )
         self.project.addMapLayer( layer, addToLegend=False )
         ltg = self.taskLayerTreeGroup[ layerId ][ typeGroup ]
         ltl = ltg.addLayer( layer )
