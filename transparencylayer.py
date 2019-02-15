@@ -37,7 +37,7 @@ class RasterTransparency():
         elif isinstance( renderer, QgsMultiBandColorRenderer ):
             tvp = QgsRasterTransparency.TransparentThreeValuePixel()
             tvp.percentTransparent = 100.0
-            setTransparent = renderer.rasterTransparency().setTransparentThreeValuePixelList()
+            setTransparent = renderer.rasterTransparency().setTransparentThreeValuePixelList
         else:
             return
         tvp.percentTransparent = 100.0
