@@ -762,7 +762,7 @@ class TaskCatalogOTF(QgsTask):
                         self.emitError( info['source'] )
                         continue
                     filePath = info['fileinfo'].filePath()
-                    baseName = info['fileinfo'].baseName()
+                    baseName = info['fileinfo'].completeBaseName()
                     layer = QgsRasterLayer( filePath, baseName )
                     if layer is None or not layer.isValid():
                         self.emitError( info['source'] )
