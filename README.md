@@ -12,6 +12,8 @@ Automatically adds  images that are in the catalog layer that intersect with the
 Luiz Motta
 
 ## Changelog
+- 2019-02-21
+Added timeout in existsUrl(urlopen)
 - 2019-02-18
 Use QFileInfo.completeBaseName for name of layer
 - 2019-02-11
