@@ -124,7 +124,7 @@ class DockWidgetCatalogOTF(QDockWidget):
 
         super().__init__('Catalog OTF', iface.mainWindow() )
         setupUi()
-        self.process = ProcessCatalogOTF( self, iface )
+        self.process = ProcessCatalogOTF( self )
 
     def __del__(self):
         del self.process
@@ -259,6 +259,8 @@ class DockWidgetCatalogOTF(QDockWidget):
 class ProcessCatalogOTF(QObject):
     TEMP_DIR = joinPath( QStandardPaths.writableLocation(QStandardPaths.TempLocation), 'catalogotf_gdal_wms' )
     formatQDate = 'yyyy-MM-dd'
+    namePlugin = 'Catalog OTF'
+    msgBar = QgsUtils.iface.messageBar()
 
     @staticmethod
     def isUrl(value):
@@ -268,20 +270,19 @@ class ProcessCatalogOTF(QObject):
 
     @staticmethod
     def existsUrl(url, getResponse=False):
+        timeout = 8
         isOk = True
         try:
-            response = urllib.request.urlopen( url )
-        except urllib.error.HTTPError:
+            response = urllib.request.urlopen( url, timeout=timeout )
+        except ( urllib.error.HTTPError, urllib.error.URLError ):
             isOk, response = False, None
-        except urllib.error.URLError:
+        except ( ConnectionResetError, urllib.request.socket.timeout ):
             isOk, response = False, None
         return isOk if not getResponse else ( isOk, response )
 
-    def __init__(self, widget, iface):
+    def __init__(self, widget ):
         super().__init__()
         self.widget = widget
-        self.msgBar = iface.messageBar()
-        self.namePlugin = 'Catalog OTF'
         self.project = QgsProject.instance()
         self.taskManager = QgsApplication.taskManager()
         self.taskLayerTreeGroup = {} # Set in 'run()' layer_catalog_id' : { TypeLayerTreeGroup.CATALOG: , TypeLayerTreeGroup.DATE: }
