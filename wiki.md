@@ -1,4 +1,3 @@
-
 <img src="catalogotf.svg" width="80" height="80"/>
 <img src="doc/ibama.svg" hspace="200"/>
 
@@ -27,18 +26,21 @@ Select the catalogs layers in table and "Run".
 
 ## Considerations: ##  
 
+* The catalog layer not need stay visible, it is used to get the source of images, where, are made intersects with geometries of layer with the extend of view of map.
+
 * If catalog layer have the date field, the images will be group by date.
 
-* At present, WEB images are provided only by the TMS server, where the TMS service definition is in an XML file using the [GDAL WMS format](
-https://www.gdal.org/frmt_wms.html).  
+* At present, WEB images are provided only by the TMS server, where the TMS service definition is in an XML file using the [GDAL WMS format](https://www.gdal.org/frmt_wms.html).  
 The XMLs of WEB are copied to a local directory.
+
 ![alt-text-1](doc/ctf_6.png "Run catalogs layers in selection features")
 
 * If have features selected in catalog layer, only these features will be use the search.
-![alt-text-1](doc/ctf_7.png "Run catalogs layers in selection features")
 
-* For the generation of a local layer catalog, can be use the [Image Footprint Plugin](https://github.com/lmotta/imagefootprint_plugin/wiki).
+![alt-text-1](doc/ctf_7.png "Run catalogs layers in selection features")
 
 * Can run multiple catalogs layers at same time.
 
 * Use CTRL+Click to select or deselect items in the table of Catalog On the Fly. If you Click in title of table(Layer..) all items are selected or CTRL+Click for deselect all.
+
+* For the generation of a local layer catalog, can be use the [Image Footprint Plugin](https://github.com/lmotta/imagefootprint_plugin/wiki).
