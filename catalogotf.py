@@ -38,7 +38,7 @@ from qgis.PyQt.QtCore import (
     pyqtSlot, pyqtSignal,
 )
 
-from qgis.PyQt.QtGui import QIcon, QFont, QCursor
+from qgis.PyQt.QtGui import QIcon, QCursor
 
 from qgis.PyQt.QtXml import QDomDocument
 
@@ -54,15 +54,13 @@ from qgis.core import (
     Qgis, QgsWkbTypes,
     QgsMessageLog,
     QgsApplication, QgsTask, QgsProject,
-    QgsLayerTreeGroup, QgsLayerTreeNode,
+    QgsLayerTreeNode,
     QgsMapLayer, QgsRasterLayer, QgsFeature,
     QgsFeatureRequest, QgsSpatialIndex,
-    QgsCoordinateTransform,
+    QgsCoordinateTransform
 )
 
 from qgis import utils as QgsUtils
-
-from qgis.gui import QgsMessageBar
 
 from .transparencylayer import RasterTransparency
 
@@ -779,7 +777,6 @@ class TaskCatalogOTF(QgsTask):
             def addRastersLegend(infoImages):
                 def add( info):
                     self.addRasterTreeGroup.emit( self.layerId, TypeLayerTreeGroup.CATALOG, info )
-                    #self.waitForFinished( self.timeWait )
 
                 return addLayerFunction( infoImages, add )
 
@@ -813,9 +810,7 @@ class TaskCatalogOTF(QgsTask):
                         if r['status'] == TypeStatusProcessing.CANCELLED:
                             return { 'status': TypeStatusProcessing.CANCELLED }
                         self.addRasterTreeGroup.emit( self.layerId, TypeLayerTreeGroup.DATE, info )
-                        #self.waitForFinished( self.timeWait )
                     self.setNameGroup.emit(  self.layerId, TypeLayerTreeGroup.DATE, TypeSufixLayerTreeGroup.TOTAL )
-                    self.waitForFinished( self.timeWait )
                 return { 'status': TypeStatusProcessing.COMPLETE }
 
             addFunc = addRastersLegendDate if existsDate else addRastersLegend
