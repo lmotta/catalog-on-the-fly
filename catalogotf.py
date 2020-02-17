@@ -55,6 +55,7 @@ from qgis.core import (
     QgsMessageLog,
     QgsApplication, QgsTask, QgsProject,
     QgsLayerTreeNode,
+    QgsMapLayerType,
     QgsMapLayer, QgsRasterLayer, QgsFeature,
     QgsFeatureRequest, QgsSpatialIndex,
     QgsCoordinateTransform
@@ -63,6 +64,7 @@ from qgis.core import (
 from qgis import utils as QgsUtils
 
 from .transparencylayer import RasterTransparency
+from .menulayer import MenuTMSXml
 
 class TypeLayerTreeGroup(Enum):
     CATALOG = 1
@@ -183,7 +185,7 @@ class DockWidgetCatalogOTF(QDockWidget):
         item = self.table.verticalHeaderItem( row )
         self.setFontItem( item, True )
         if totalInView is None:
-            icon, label = self.getIconLabel( layer )
+            _icon, label = self.getIconLabel( layer )
             label = "{} - {}".format( label, labelStatus )
         else:
             label = QCoreApplication.translate('CatalogOTF', '{} in View - Running...')
@@ -255,10 +257,10 @@ class DockWidgetCatalogOTF(QDockWidget):
         self.findCatalog.emit()
 
 class ProcessCatalogOTF(QObject):
-    TEMP_DIR = joinPath( QStandardPaths.writableLocation(QStandardPaths.TempLocation), 'catalogotf_gdal_wms' )
     formatQDate = 'yyyy-MM-dd'
-    namePlugin = 'Catalog OTF'
+    namePlugin = 'Catalog_OTF'
     msgBar = QgsUtils.iface.messageBar()
+    formatError = QCoreApplication.translate('CatalogOTF', "Error '{}'" )
 
     @staticmethod
     def isUrl(value):
@@ -287,13 +289,14 @@ class ProcessCatalogOTF(QObject):
         self.ltgRoot = self.project.layerTreeRoot()
         #
         self.nameCatalog = 'Catalogs OTF'
+        self.menuLayer = MenuTMSXml()
         self.totalRunning = 0
         self.totalFinish = 0
-        self.msgUseDir_gdal_wms = None
         #
         self.widget.runCatalog.connect( self.run )
         self.widget.findCatalog.connect( self.find )
         self.project.layerWillBeRemoved.connect( self.removeLayer )
+        self.project.layerWasAdded.connect( self.addedLayer )
         self.taskManager.statusChanged.connect( self.statusProcessing )
 
     @pyqtSlot(str, str)
@@ -302,10 +305,21 @@ class ProcessCatalogOTF(QObject):
         self.taskLayerTreeGroup[ layerId ][ TypeLayerTreeGroup.DATE ] = ltg.addGroup( nameDate )
 
     @pyqtSlot(str, TypeLayerTreeGroup, dict)
-    def addRasterTreeGroupTask(self, layerId, typeGroup, info):
-        layer = QgsRasterLayer( info['filePath'], info['baseName'] )
-        if not info['filePath'][-4:] == 'xml':
+    def addRasterTreeGroupTask(self, layerId, typeGroup, image):
+        layer = QgsRasterLayer( image['filePath'], image['baseName'] )
+        if layer is None or not layer.isValid():
+            task = self.sender()
+            msg = self.formatError.format( image['source'] )
+            msg = "{}: {}".format( task.layer.name(), msg )
+            task.countError += 1
+            self.messageLog( msg )
+            return
+
+        if not image['filePath'][-4:] == 'xml':
             RasterTransparency.setTransparency( layer )
+        if 'wktBBox' in image:
+            layer.setCustomProperty('wktBBox', image['wktBBox'] )
+            #self.menuLayer.setLayer( layer )
         self.project.addMapLayer( layer, addToLegend=False )
         ltg = self.taskLayerTreeGroup[ layerId ][ typeGroup ]
         ltl = ltg.addLayer( layer )
@@ -378,9 +392,9 @@ class ProcessCatalogOTF(QObject):
     def messageStatus(self, message, level ):
         self.msgBar.pushMessage( self.namePlugin , message, level, 4 )
 
-    @pyqtSlot(str, str)
-    def messageLog(self, message, tag):
-        QgsMessageLog.logMessage( message, tag, Qgis.Warning )
+    @pyqtSlot(str)
+    def messageLog(self, message):
+        QgsMessageLog.logMessage( message, self.namePlugin, Qgis.Warning )
 
     @pyqtSlot(bool, list)
     def run(self, isProcessing, layerIds):
@@ -455,19 +469,7 @@ class ProcessCatalogOTF(QObject):
 
             def existsSource(value):
                 if self.isUrl( value ):
-                    isOk = self.existsUrl( value )
-                    if isOk:
-                        if not QDir( self.TEMP_DIR ).exists():
-                            QDir().mkdir( self.TEMP_DIR )
-                            msg = QCoreApplication.translate('CatalogOTF', 'Created diretory {}')
-                            self.msgUseDir_gdal_wms = msg.format( self.TEMP_DIR )
-                        else:
-                            msg = QCoreApplication.translate('CatalogOTF', 'Diretory {} for virtual raster(XML)' )
-                            self.msgUseDir_gdal_wms = msg.format( self.TEMP_DIR )
-
-                    return isOk
-
-                # File
+                    return self.existsUrl( value )
                 fileInfo = QFileInfo( value )
                 return fileInfo.isFile()
 
@@ -498,7 +500,6 @@ class ProcessCatalogOTF(QObject):
             return { 'fieldSource': fieldSource, 'fieldDate': fieldDate }
 
         overrideCursor()
-        self.msgUseDir_gdal_wms = None
         total = 0
         layerIds = self.widget.getLayerIds().keys()
         f = lambda layer: \
@@ -520,8 +521,6 @@ class ProcessCatalogOTF(QObject):
         if total > 0:
             msg = QCoreApplication.translate('CatalogOTF', 'Added {} layer(s)')
             msg = msg.format( total )
-            if not self.msgUseDir_gdal_wms is None:
-                msg = "{}. {}".format( msg, self.msgUseDir_gdal_wms )
             self.msgBar.pushMessage( self.namePlugin , msg, Qgis.Info, 4 )
         else:
             msg = QCoreApplication.translate('CatalogOTF', 'Not found a new catalog layer')
@@ -534,6 +533,12 @@ class ProcessCatalogOTF(QObject):
             return
         row = layerIdsTable[ layerId ]
         self.widget.removeLayers( [ row ] )
+
+    @pyqtSlot(QgsMapLayer)
+    def addedLayer(self, layer):
+        wktBBox = layer.customProperty('wktBBox', None)
+        if not wktBBox is None:
+            self.menuLayer.setLayer( layer )
 
     @pyqtSlot('QgsFeatureIds', 'QgsFeatureIds', bool)
     def selectionChangedLayer(self, selected, deselected, clearAndSelect):
@@ -560,7 +565,7 @@ class ProcessCatalogOTF(QObject):
                 self.widget.setNameLayer( layerIdsTable[ layerId ], name )
 
 class TaskCatalogOTF(QgsTask):
-    messageLog         = pyqtSignal(str, str)
+    messageLog         = pyqtSignal(str)
     messageStatus      = pyqtSignal(str, int)
     foundFeatures      = pyqtSignal(int)
     addDateTreeGroup   = pyqtSignal(str, str)
@@ -575,7 +580,6 @@ class TaskCatalogOTF(QgsTask):
          self.fieldSource = data['fieldSource']
          self.fieldDate = data['fieldDate']
          self.canvas = QgsUtils.iface.mapCanvas()
-         self.formatError = QCoreApplication.translate('CatalogOTF', "Error '{}'" )
          self.countError = 0
          self.totalFeatures = 0
          self.setDependentLayers( [ self.layer] )
@@ -590,10 +594,10 @@ class TaskCatalogOTF(QgsTask):
         self.messageStatus.emit( msg, level )
     
     def emitError(self, value):
-        msg = self.formatError.format( value )
+        msg = ProcessCatalogOTF.formatError.format( value )
         msg = "{}: {}".format( self.layer.name(), msg )
         self.countError += 1
-        self.messageLog.emit( msg, self.description() )
+        self.messageLog.emit( msg )
 
     def run(self):
         def getImagesByCanvas():
@@ -650,139 +654,137 @@ class TaskCatalogOTF(QgsTask):
             del fids[:]
             return r
 
-        def getInfoImages(images):
-            def getFileInfo( image ):
-                def prepareFileTMS( url_xml ):
-                    def createLocalFile():
-                        def existsServerUrl(docHtml):
-                            def isValueAttribute(node, name, value):
-                                atts = node.attributes()
-                                if atts.isEmpty() or not atts.contains(name):
-                                    return False
-                                v = atts.namedItem(name).firstChild().nodeValue()
-                                return v.upper() == value.upper()
+        def setSortReverseImages(images):
+            """
+            images: List of { 'source' } or { 'source', 'date' }
 
-                            nodesService = docHtml.elementsByTagName('Service')
-                            if nodesService.isEmpty():
-                                return False
-                            nodeService = nodesService.item(0)
-                            if not isValueAttribute( nodeService, 'name', 'TMS' ):
-                                return False
-                            # Check url
-                            nodes = nodeService.toElement().elementsByTagName('ServerUrl')
-                            if nodes.isEmpty():
-                                return False
-                            node = nodes.item(0).firstChild()
-                            url_tms = node.nodeValue()
-                            idx = url_tms.index('/${z}/${x}/${y}')
-                            url = url_tms[:idx]
-                            return ProcessCatalogOTF.existsUrl( url )
+            Return: TypeStatusProcessing.COMPLETE or 
+                    TypeStatusProcessing.CANCELLED
 
-                        def populateLocalFile(docHtml):
-                            def setPath(newPath):
-                                nodesCache = docHtml.elementsByTagName('Cache')
-                                if nodesCache.isEmpty():
-                                    nodeGdalWms = docHtml.firstChild()
-                                    nodeCache = docHtml.createElement('Cache')
-                                    nodeGdalWms.appendChild( nodeCache )
-                                else:
-                                    nodeCache = nodesCache.item(0)
-                                    nodesPath = nodeCache.toElement().elementsByTagName('Path')
-                                    if not nodesPath.isEmpty():
-                                        nodePath = nodesPath.item(0)
-                                        nodeCache.removeChild( nodePath )
-                                textNode = docHtml.createTextNode( newPath )
-                                nodePath  = docHtml.createElement('Path')
-                                nodePath.appendChild( textNode )                               
-                                nodeCache.appendChild( nodePath )
+            Process: Sorted(reverse) the 'images' by date(if have) or source
+                     and set images with:  { 'isOk', 'source', 'wktBBox' }
+                'isOk': True if source exist. For Http/XML check URL and the '<ServerUrl>'
+                'source': If Http/XML is OK, change for '/vsicurl/[source]'
+                'wktBBox': It will add if have '<TargetWindow>' in Http/XML
+            """
+            def setImage(image):
+                def getValueTag(nodeRoot, tag):
+                    nodes = nodeRoot.toElement().elementsByTagName( tag )
+                    if nodes.isEmpty():
+                        return None
+                    node = nodes.item(0).firstChild()
+                    return node.nodeValue()
 
-                                return docHtml.toString()
+                def isValidXml(doc):
+                    def hasValueAttribute(node, name, value):
+                        atts = node.attributes()
+                        if atts.isEmpty() or not atts.contains(name):
+                            return False
+                        v = atts.namedItem(name).firstChild().nodeValue()
+                        return v.upper() == value.upper()
 
-                            newPath = "{}.tms".format( localName )
-                            html = setPath( newPath  )
-                            fw = open( localName, 'w' )
-                            fw.write( html)
-                            fw.close()
+                    def existsServerUrl(url_tms):
+                        idx = url_tms.index('/${z}/${x}/${y}')
+                        url = url_tms[:idx]
+                        return ProcessCatalogOTF.existsUrl( url )
 
-                        isOk, response = ProcessCatalogOTF.existsUrl( url_xml, True )
-                        if not isOk:
+                    nodesService = doc.elementsByTagName('Service')
+                    if nodesService.isEmpty():
+                        return False
+
+                    nodeService = nodesService.item(0)
+                    if not hasValueAttribute( nodeService, 'name', 'TMS' ):
+                        return False
+                    # Check url
+                    url_tms = getValueTag( nodeService, 'ServerUrl' )
+                    if url_tms is None:
+                        return False
+
+                    return existsServerUrl(url_tms)
+
+                def getWktBBox(doc):
+                    nodesTargetWindow = doc.elementsByTagName('TargetWindow')
+                    if nodesTargetWindow.isEmpty():
+                        return None
+
+                    nodeTargetWindow = nodesTargetWindow.item(0)
+                    coords = []
+                    for tag in ( 'UpperLeftX', 'UpperLeftY', 'LowerRightX', 'LowerRightY' ):
+                        v = getValueTag( nodeTargetWindow, tag )
+                        if v is None:
                             return None
-                        html = response.read()
-                        response.close()
-                        docHtml = QDomDocument()
-                        docHtml.setContent( html.decode('utf-8') )
-                        if not existsServerUrl( docHtml ):
-                            return None
-                        populateLocalFile( docHtml )
-                        return QFileInfo( localName )
+                        coords.append( float( v ) )
+                    [ ulX, ulY, lrX, lrY ] = coords
+                    #
+                    wkt = f"POLYGON(({ulX} {ulY}, {lrX} {ulY}, {lrX} {lrY}, {ulX} {lrY}, {ulX} {ulY}))"
+                    return wkt
+                
+                if not ProcessCatalogOTF.isUrl( image['source'] ):
+                    fileInfo = QFileInfo( image['source'] )
+                    isOk = fileInfo.isFile()
+                    image['isOk'] = isOk
+                    return
+                # Http/XML
+                isOk, response = ProcessCatalogOTF.existsUrl( image['source'], True )
+                if not isOk:
+                    image['isOk'] = False
+                    return
+                #
+                xml = response.read()
+                response.close()
+                doc = QDomDocument()
+                doc.setContent( xml.decode('utf-8') )
+                if not isValidXml( doc ):
+                    image['isOk'] = False
+                    return
 
-                    localName = "{}/{}".format( ProcessCatalogOTF.TEMP_DIR, basename( url_xml ) )
-                    fileInfo = QFileInfo( localName )
-                    if not fileInfo.exists():
-                        fileInfo = createLocalFile() # If error return None
-                    return fileInfo
-
-                source = image['source']
-                if ProcessCatalogOTF.isUrl( source ):
-                    fi = prepareFileTMS( source ) # If error return None
-                else:
-                    fi = QFileInfo( source )
-                    if not fi.isFile():
-                        fi = None
-                vReturn = { 'source': source, 'fileinfo': fi    }
-                if 'date' in image.keys():
-                    vReturn['date'] = image['date']
-
-                return vReturn
+                image['isOk'] = True
+                image['source'] = f"/vsicurl/{image['source']}"
+                wkt = getWktBBox( doc )
+                if not wkt is None:
+                    image['wktBBox'] = wkt
 
             # Sorted images
             key = 'date' if not self.fieldDate is None else 'source'
-            f_key = lambda item: item[ key ]    
-            l_image_sorted = sorted( images, key=f_key, reverse=True )
-            del images[:]
-            # infoImages = { 'source', 'fileinfo', 'date' } or { 'source', fileinfo' }
-            # - If error when read XML,  'fileinfo'  is None
-            infoImages = []
-            for image in l_image_sorted:
+            images.sort( key=lambda item: item[ key ], reverse=True )
+            for image in images:
                 if self.isCanceled():
-                    del infoImages[:]
-                    del l_image_sorted[:]
-                    return { 'status': TypeStatusProcessing.CANCELLED }
-                infoImages.append( getFileInfo( image ) )
-            del l_image_sorted[:]
-            return { 'status': TypeStatusProcessing.COMPLETE, 'infoImages': infoImages }
+                    return TypeStatusProcessing.CANCELLED
+                setImage( image )
+            
+            return TypeStatusProcessing.COMPLETE
 
-        def addImages(infoImages, existsDate):
-            def addLayerFunction(infoImages, functionAdd):
-                for info in infoImages:
+        def addImages(images, existsDate):
+            """
+            images: List of 
+            """
+            def addLayerFunction(images, functionAdd):
+                info = QFileInfo()
+                for image in images:
                     if self.isCanceled():
                         return { 'status': TypeStatusProcessing.CANCELLED }
-                    if info['fileinfo'] is None:
-                        self.emitError( info['source'] )
+                    if not image['isOk']:
+                        self.emitError( image['source'] )
                         continue
-                    filePath = info['fileinfo'].filePath()
-                    baseName = info['fileinfo'].completeBaseName()
-                    layer = QgsRasterLayer( filePath, baseName )
-                    if layer is None or not layer.isValid():
-                        self.emitError( info['source'] )
-                        layer = None
-                        continue
-                    layer = None
-                    del info['fileinfo']
-                    info['filePath'] = filePath
-                    info['baseName'] = baseName
-                    functionAdd( info )
+                    info.setFile( image['source'] )
+                    filePath = info.filePath()
+                    baseName = info.completeBaseName()
+                    image['filePath'] = filePath
+                    image['baseName'] = baseName
+                    del image['source']
+                    del image['isOk']
+                    functionAdd( image )
                 return { 'status': TypeStatusProcessing.COMPLETE }
 
-            def addRastersLegend(infoImages):
-                def add( info):
-                    self.addRasterTreeGroup.emit( self.layerId, TypeLayerTreeGroup.CATALOG, info )
+            def addRastersLegend(images):
+                def add( image):
+                    self.addRasterTreeGroup.emit( self.layerId, TypeLayerTreeGroup.CATALOG, image )
 
-                return addLayerFunction( infoImages, add )
+                return addLayerFunction( images, add )
 
-            def addRastersLegendDate(infoImages):
+            def addRastersLegendDate(images):
                 def getZeroDateLayers():
-                    dates = [ info['date'] for info in infoImages ]
+                    dates = [ img['date'] for img in images ]
                     dates = set( dates )
                     datesLayers = {}
                     for date in dates:
@@ -795,7 +797,7 @@ class TaskCatalogOTF(QgsTask):
                 if r['status'] == TypeStatusProcessing.CANCELLED:
                     return r
                 datesLayers = r['datesLayers']
-                r = addLayerFunction( infoImages, lambda info: datesLayers[ info['date'] ].append( info ) )
+                r = addLayerFunction( images, lambda image: datesLayers[ image['date'] ].append( image ) )
                 if r['status'] == TypeStatusProcessing.CANCELLED:
                     del datesLayers[:]
                     return r
@@ -806,15 +808,15 @@ class TaskCatalogOTF(QgsTask):
                         return { 'status': TypeStatusProcessing.CANCELLED }
                     self.addDateTreeGroup.emit( self.layerId, date )
                     self.waitForFinished( self.timeWait )
-                    for info in datesLayers[ date ]:
+                    for image in datesLayers[ date ]:
                         if r['status'] == TypeStatusProcessing.CANCELLED:
                             return { 'status': TypeStatusProcessing.CANCELLED }
-                        self.addRasterTreeGroup.emit( self.layerId, TypeLayerTreeGroup.DATE, info )
+                        self.addRasterTreeGroup.emit( self.layerId, TypeLayerTreeGroup.DATE, image )
                     self.setNameGroup.emit(  self.layerId, TypeLayerTreeGroup.DATE, TypeSufixLayerTreeGroup.TOTAL )
                 return { 'status': TypeStatusProcessing.COMPLETE }
 
             addFunc = addRastersLegendDate if existsDate else addRastersLegend
-            r = addFunc( infoImages )
+            r = addFunc( images )
             if r['status'] == TypeStatusProcessing.CANCELLED:
                 self.setNameGroup.emit( self.layerId, TypeLayerTreeGroup.CATALOG, TypeSufixLayerTreeGroup.CANCELLED )
             else:
@@ -826,15 +828,15 @@ class TaskCatalogOTF(QgsTask):
         if r['status'] == TypeStatusProcessing.CANCELLED:
             self.setNameGroup.emit( self.layerId, TypeLayerTreeGroup.CATALOG, TypeSufixLayerTreeGroup.CANCELLED )
             return False
-        if len( r['images']) == 0:
+        images = r['images']
+        if len(images ) == 0:
             self.setNameGroup.emit( self.layerId, TypeLayerTreeGroup.CATALOG, TypeSufixLayerTreeGroup.TOTAL )
             return True
-        r = getInfoImages(r['images'] )
-        if r['status'] == TypeStatusProcessing.CANCELLED:
+        status = setSortReverseImages( images )
+        if status == TypeStatusProcessing.CANCELLED:
             self.setNameGroup.emit( self.layerId, TypeLayerTreeGroup.CATALOG, TypeSufixLayerTreeGroup.CANCELLED )
             return False
-        infoImages = r['infoImages']
-        self.totalFeatures = len( infoImages )
+        self.totalFeatures = len( images )
         self.foundFeatures.emit( self.totalFeatures )
-        r = addImages( infoImages, not self.fieldDate is None )
+        r = addImages( images, not self.fieldDate is None )
         return True if r['status'] == TypeStatusProcessing.COMPLETE else False

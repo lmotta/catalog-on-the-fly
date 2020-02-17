@@ -4,10 +4,13 @@ description:Automatically adds images that are in the catalog layer that interse
 about:This plugin work with catalog layer.
   Catalog layer need be have the geometry type of polygon and have a field, the image address(type string),
   and optionaly can be have a field with the date of image.
+  The field, image address, can be a local files or WEB address. The WEB address need be a XML of 
+  type GDAL_WMS(https://gdal.org/drivers/raster/wms.html)
+
   This plugin is developed on the demand of IBAMA(Brazilian Institute of Environment and Renewable Natural Resources)
   http://www.ibama.gov.br
 
-version:2.5
+version:2.6
 qgisMinimumVersion:3.2
 
 author:Luiz Motta
@@ -23,12 +26,14 @@ repository:https://github.com/lmotta/catalog-on-the-fly
 
 icon:catalogotf.svg
 
-experimental:True
+experimental:False
 deprecated:False
 
-changelog:2.5(209-02-21)
+changelog: 2.6(2020-02-17)
+  Remove creation of local file from XML
+  - 2.5(2019-02-21)
   Added timeout in existsUrl(urlopen)
-  - 2.4(209-02-18)
+  - 2.4(2019-02-18)
   Use QFileInfo.completeBaseName for name of layer
   - 2.3(2019-02-11)
   Add transparecy for raster(Single or RGB bands)

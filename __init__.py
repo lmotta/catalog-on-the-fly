@@ -45,20 +45,8 @@ class CatalogOTFPlugin(QObject):
         self.iface = iface
         # self.projOTF = ProjectDockWidgetCatalogOTF( iface )
         self.name = u'&Catalog OTF'
-        self.dock = None
+        self.dock = None # initGui
         self.translate = Translate('catalogotf')
-
-    def _connect(self, isConnect = True):
-        signal_slot = (
-            { 'signal': QgsProject.instance().readProject, 'slot': self.projOTF.onReadProject },
-            { 'signal': QgsProject.instance().writeProject, 'slot': self.projOTF.onWriteProject }
-        )
-        if isConnect:
-            for item in signal_slot:
-                item['signal'].connect( item['slot'] )
-        else:
-            for item in signal_slot:
-                item['signal'].disconnect( item['slot'] )
 
     def initGui(self):
         name = 'Catalog OTF'
@@ -73,8 +61,6 @@ class CatalogOTFPlugin(QObject):
 
         self.iface.addRasterToolBarIcon( self.action )
         self.iface.addPluginToRasterMenu( self.name, self.action )
-
-        #self._connect()
 
         self.dock = DockWidgetCatalogOTF( self.iface )
         self.iface.addDockWidget( Qt.RightDockWidgetArea , self.dock )

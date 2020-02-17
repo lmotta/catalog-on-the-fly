@@ -12,6 +12,8 @@ Automatically adds  images that are in the catalog layer that intersect with the
 Luiz Motta
 
 ## Changelog
+- 2.6(2020-02-17)
+Remove creation of local file from XML
 - 2019-02-21
 Added timeout in existsUrl(urlopen)
 - 2019-02-18
