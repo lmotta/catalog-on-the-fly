@@ -55,7 +55,6 @@ from qgis.core import (
     QgsMessageLog,
     QgsApplication, QgsTask, QgsProject,
     QgsLayerTreeNode,
-    QgsMapLayerType,
     QgsMapLayer, QgsRasterLayer, QgsFeature,
     QgsFeatureRequest, QgsSpatialIndex,
     QgsCoordinateTransform
