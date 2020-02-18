@@ -10,7 +10,7 @@ about:This plugin work with catalog layer.
   This plugin is developed on the demand of IBAMA(Brazilian Institute of Environment and Renewable Natural Resources)
   http://www.ibama.gov.br
 
-version:2.6.1
+version:2.7
 qgisMinimumVersion:3.4
 
 author:Luiz Motta
@@ -29,7 +29,9 @@ icon:catalogotf.svg
 experimental:False
 deprecated:False
 
-changelog: 2.6.1(2020-02-18)
+changelog: 2.7(2020-02-18)
+  Fix the import QgsMapLayerType class (not in needed). Version 2.6 continue active
+  - 2.6.1(2020-02-18)
   Fix the import QgsMapLayerType class (not in needed)
   - 2.6(2020-02-17)
   Remove creation of local file from XML
